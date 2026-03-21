@@ -69,7 +69,7 @@ async fn handle_connection(
     let stdin_tx = handle.stdin_tx.clone();
     let mut output = handle.subscribe_buffered(Duration::ZERO);
 
-    let write_task = tokio::spawn(async move {
+    let mut write_task = tokio::spawn(async move {
         while let Some(data) = output.recv().await {
             if writer.write_all(&data).await.is_err() {
                 break;
@@ -77,7 +77,7 @@ async fn handle_connection(
         }
     });
 
-    let read_task = tokio::spawn(async move {
+    let mut read_task = tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         loop {
             match reader.read(&mut buf).await {
@@ -92,9 +92,10 @@ async fn handle_connection(
         }
     });
 
+    // M6 fix: abort the other task when one finishes.
     tokio::select! {
-        _ = write_task => {}
-        _ = read_task => {}
+        _ = &mut write_task => { read_task.abort(); }
+        _ = &mut read_task => { write_task.abort(); }
     }
 
     Ok(())

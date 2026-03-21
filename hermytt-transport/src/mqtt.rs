@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use hermytt_core::SessionManager;
 use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::Transport;
 
@@ -69,7 +69,7 @@ impl Transport for MqttTransport {
 async fn request_loop(
     mut eventloop: EventLoop,
     client: AsyncClient,
-    sessions: Arc<SessionManager>,
+    _sessions: Arc<SessionManager>,
 ) {
     loop {
         match eventloop.poll().await {
@@ -100,6 +100,13 @@ async fn request_loop(
                         }
                     }
                 });
+            }
+            // H5 fix: resubscribe after reconnect.
+            Ok(rumqttc::Event::Incoming(rumqttc::Packet::ConnAck(_))) => {
+                info!(transport = "mqtt", "reconnected, resubscribing");
+                if let Err(e) = client.subscribe("hermytt/+/in", QoS::AtMostOnce).await {
+                    error!(transport = "mqtt", error = %e, "resubscribe failed");
+                }
             }
             Ok(_) => {}
             Err(e) => {

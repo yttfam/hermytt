@@ -191,10 +191,12 @@ fn chunk_message(text: &str) -> Vec<&str> {
             break;
         }
 
-        let split_at = remaining[..MAX_MESSAGE_LEN]
+        // M5 fix: safe UTF-8 boundary.
+        let boundary = remaining.floor_char_boundary(MAX_MESSAGE_LEN);
+        let split_at = remaining[..boundary]
             .rfind('\n')
             .map(|i| i + 1)
-            .unwrap_or(MAX_MESSAGE_LEN);
+            .unwrap_or(boundary);
 
         chunks.push(&remaining[..split_at]);
         remaining = &remaining[split_at..];

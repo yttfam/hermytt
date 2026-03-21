@@ -4,18 +4,17 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{error, info, warn};
 
 pub type SessionId = String;
 
-/// A handle that transports use to interact with a session.
 #[derive(Clone)]
 pub struct SessionHandle {
     pub id: SessionId,
     pub stdin_tx: mpsc::Sender<Vec<u8>>,
     pub output_tx: broadcast::Sender<Vec<u8>>,
-    pub scrollback: Arc<Mutex<ScrollbackBuffer>>,
+    pub scrollback: Arc<std::sync::Mutex<ScrollbackBuffer>>,
 }
 
 impl SessionHandle {
@@ -31,15 +30,16 @@ impl SessionHandle {
     }
 
     /// Execute a command and collect output until the shell goes quiet.
-    ///
-    /// Returns raw bytes. Caller is responsible for decoding/stripping ANSI.
-    /// `silence` is how long to wait with no output before considering the
-    /// command done (e.g., 500ms).
-    pub async fn execute(&self, cmd: &str, silence: std::time::Duration) -> Result<Vec<u8>> {
+    /// `silence`: how long with no output before considering done.
+    /// `deadline`: absolute max time to wait.
+    pub async fn execute(
+        &self,
+        cmd: &str,
+        silence: std::time::Duration,
+        deadline: std::time::Duration,
+    ) -> Result<Vec<u8>> {
         let mut rx = self.output_tx.subscribe();
 
-        // Send the command + carriage return (Enter).
-        // \r works for both line-buffered shells (PTY translates) and raw-mode apps.
         let mut input = cmd.to_string();
         if !input.ends_with('\r') && !input.ends_with('\n') {
             input.push('\r');
@@ -49,10 +49,14 @@ impl SessionHandle {
             .await
             .map_err(|_| anyhow::anyhow!("session stdin closed"))?;
 
-        // Collect output until silence.
         let mut output = Vec::new();
+        let absolute = tokio::time::sleep(deadline);
+        tokio::pin!(absolute);
+
         loop {
             tokio::select! {
+                biased;
+                _ = &mut absolute => break,
                 result = rx.recv() => {
                     match result {
                         Ok(data) => output.extend_from_slice(&data),
@@ -60,10 +64,7 @@ impl SessionHandle {
                         Err(broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                _ = tokio::time::sleep(silence) => {
-                    // No output for `silence` duration — command is done.
-                    break;
-                }
+                _ = tokio::time::sleep(silence) => break,
             }
         }
 
@@ -91,12 +92,13 @@ impl ScrollbackBuffer {
             if self.lines.len() >= self.capacity {
                 self.lines.pop_front();
             }
-            let truncated = if line.len() > MAX_LINE_LEN {
-                &line[..MAX_LINE_LEN]
+            // Safe UTF-8 truncation.
+            let end = if line.len() > MAX_LINE_LEN {
+                line.floor_char_boundary(MAX_LINE_LEN)
             } else {
-                line
+                line.len()
             };
-            self.lines.push_back(truncated.to_string());
+            self.lines.push_back(line[..end].to_string());
         }
     }
 
@@ -112,8 +114,10 @@ impl ScrollbackBuffer {
 /// A running PTY session.
 pub struct Session {
     pub handle: SessionHandle,
-    stdin_rx: Mutex<Option<mpsc::Receiver<Vec<u8>>>>,
-    child: Mutex<Option<Box<dyn Child + Send>>>,
+    stdin_rx: tokio::sync::Mutex<Option<mpsc::Receiver<Vec<u8>>>>,
+    child: tokio::sync::Mutex<Option<Box<dyn Child + Send>>>,
+    // Keep the slave alive until the session is dropped.
+    _slave: std::sync::Mutex<Option<Box<dyn portable_pty::SlavePty + Send>>>,
     shell: String,
 }
 
@@ -122,7 +126,9 @@ impl Session {
         let id = uuid::Uuid::new_v4().to_string().replace('-', "")[..16].to_string();
         let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>(256);
         let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
-        let scrollback = Arc::new(Mutex::new(ScrollbackBuffer::new(scrollback_capacity)));
+        let scrollback = Arc::new(std::sync::Mutex::new(ScrollbackBuffer::new(
+            scrollback_capacity,
+        )));
 
         let handle = SessionHandle {
             id: id.clone(),
@@ -133,13 +139,13 @@ impl Session {
 
         Ok(Arc::new(Self {
             handle,
-            stdin_rx: Mutex::new(Some(stdin_rx)),
-            child: Mutex::new(None),
+            stdin_rx: tokio::sync::Mutex::new(Some(stdin_rx)),
+            child: tokio::sync::Mutex::new(None),
+            _slave: std::sync::Mutex::new(None),
             shell: shell.to_string(),
         }))
     }
 
-    /// Spawn the PTY and start I/O loops. Call once.
     pub async fn start(self: &Arc<Self>) -> Result<()> {
         let mut stdin_rx = self
             .stdin_rx
@@ -166,7 +172,8 @@ impl Session {
             .context("failed to spawn shell")?;
 
         *self.child.lock().await = Some(child);
-        drop(pair.slave);
+        // H1 fix: keep slave alive to avoid race on macOS.
+        *self._slave.lock().unwrap() = Some(pair.slave);
 
         let mut master_writer = pair.master.take_writer()?;
         let mut master_reader = pair.master.try_clone_reader()?;
@@ -187,7 +194,8 @@ impl Session {
                     Ok(n) => {
                         let data = buf[..n].to_vec();
                         if let Ok(text) = std::str::from_utf8(&data) {
-                            if let Ok(mut sb) = scrollback.try_lock() {
+                            // H2 fix: std::sync::Mutex — never held across await, safe in spawn_blocking.
+                            if let Ok(mut sb) = scrollback.lock() {
                                 sb.push(text);
                             }
                         }
@@ -201,7 +209,6 @@ impl Session {
             }
         });
 
-        // stdin channel -> PTY stdin
         tokio::spawn(async move {
             while let Some(data) = stdin_rx.recv().await {
                 if master_writer.write_all(&data).is_err() {
@@ -236,7 +243,11 @@ impl SessionManager {
         Self::with_max_sessions(shell, scrollback_capacity, 16)
     }
 
-    pub fn with_max_sessions(shell: &str, scrollback_capacity: usize, max_sessions: usize) -> Self {
+    pub fn with_max_sessions(
+        shell: &str,
+        scrollback_capacity: usize,
+        max_sessions: usize,
+    ) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
             shell: shell.to_string(),
@@ -245,22 +256,19 @@ impl SessionManager {
         }
     }
 
+    // C2 fix: hold write lock for entire create sequence — atomic check + insert.
     pub async fn create_session(&self) -> Result<SessionHandle> {
-        let sessions = self.sessions.read().await;
+        let mut sessions = self.sessions.write().await;
         anyhow::ensure!(
             sessions.len() < self.max_sessions,
             "max sessions ({}) reached",
             self.max_sessions
         );
-        drop(sessions);
 
         let session = Session::new(&self.shell, self.scrollback_capacity)?;
         session.start().await?;
         let handle = session.handle.clone();
-        self.sessions
-            .write()
-            .await
-            .insert(handle.id.clone(), session);
+        sessions.insert(handle.id.clone(), session);
         info!(session = %handle.id, "session created");
         Ok(handle)
     }
@@ -320,7 +328,6 @@ mod tests {
         let mut sb = ScrollbackBuffer::new(3);
         sb.push("a\nb\nc");
         sb.push("d");
-        // "a\nb\nc" produces ["a","b","c"], then "d" pushes out "a"
         assert_eq!(sb.get_all(), vec!["b", "c", "d"]);
     }
 
@@ -330,6 +337,16 @@ mod tests {
         let long = "x".repeat(MAX_LINE_LEN + 100);
         sb.push(&long);
         assert_eq!(sb.get_all()[0].len(), MAX_LINE_LEN);
+    }
+
+    #[test]
+    fn scrollback_truncates_multibyte_safely() {
+        let mut sb = ScrollbackBuffer::new(10);
+        // 3-byte UTF-8 chars: if MAX_LINE_LEN falls mid-char, should not panic.
+        let long = "\u{2603}".repeat(MAX_LINE_LEN); // snowman, 3 bytes each
+        sb.push(&long);
+        // Should not panic; length <= MAX_LINE_LEN bytes.
+        assert!(sb.get_all()[0].len() <= MAX_LINE_LEN);
     }
 
     #[test]

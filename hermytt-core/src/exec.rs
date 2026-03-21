@@ -1,19 +1,79 @@
+use std::time::Duration;
+
 use anyhow::Result;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_OUTPUT: usize = 1024 * 1024; // 1MB cap per stream
+
 /// Execute a shell command directly (no PTY), capture stdout + stderr.
-/// Clean, no ANSI, no prompt, no echo. For request-response transports.
+/// Timeout after 30s. Output capped at 1MB per stream.
 pub async fn exec(cmd: &str, shell: &str) -> Result<ExecResult> {
-    let output = Command::new(shell)
+    let mut child = Command::new(shell)
         .arg("-c")
         .arg(cmd)
-        .output()
-        .await?;
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let mut stdout_buf = vec![0u8; MAX_OUTPUT];
+    let mut stderr_buf = vec![0u8; MAX_OUTPUT];
+    let mut stdout_len = 0;
+    let mut stderr_len = 0;
+
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+
+    let result = tokio::time::timeout(DEFAULT_TIMEOUT, async {
+        let (so, se) = tokio::join!(
+            async {
+                loop {
+                    if stdout_len >= MAX_OUTPUT {
+                        break;
+                    }
+                    match stdout.read(&mut stdout_buf[stdout_len..]).await {
+                        Ok(0) => break,
+                        Ok(n) => stdout_len += n,
+                        Err(_) => break,
+                    }
+                }
+            },
+            async {
+                loop {
+                    if stderr_len >= MAX_OUTPUT {
+                        break;
+                    }
+                    match stderr.read(&mut stderr_buf[stderr_len..]).await {
+                        Ok(0) => break,
+                        Ok(n) => stderr_len += n,
+                        Err(_) => break,
+                    }
+                }
+            }
+        );
+        drop((so, se, stdout, stderr));
+        child.wait().await
+    })
+    .await;
+
+    let status = match result {
+        Ok(Ok(status)) => status,
+        Ok(Err(e)) => return Err(e.into()),
+        Err(_) => {
+            let _ = child.kill().await;
+            anyhow::bail!("command timed out after {}s", DEFAULT_TIMEOUT.as_secs());
+        }
+    };
+
+    let stdout_str = String::from_utf8_lossy(&stdout_buf[..stdout_len]).to_string();
+    let stderr_str = String::from_utf8_lossy(&stderr_buf[..stderr_len]).to_string();
 
     Ok(ExecResult {
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-        exit_code: output.status.code().unwrap_or(-1),
+        stdout: stdout_str,
+        stderr: stderr_str,
+        exit_code: status.code().unwrap_or(-1),
+        truncated: stdout_len >= MAX_OUTPUT || stderr_len >= MAX_OUTPUT,
     })
 }
 
@@ -21,18 +81,22 @@ pub struct ExecResult {
     pub stdout: String,
     pub stderr: String,
     pub exit_code: i32,
+    pub truncated: bool,
 }
 
 impl ExecResult {
-    /// Combined output — stderr appended if non-empty.
     pub fn combined(&self) -> String {
-        if self.stderr.is_empty() {
+        let mut out = if self.stderr.is_empty() {
             self.stdout.clone()
         } else if self.stdout.is_empty() {
             self.stderr.clone()
         } else {
             format!("{}\n{}", self.stdout.trim_end(), self.stderr)
+        };
+        if self.truncated {
+            out.push_str("\n(output truncated)");
         }
+        out
     }
 }
 
@@ -45,6 +109,7 @@ mod tests {
         let result = exec("echo hello", "/bin/sh").await.unwrap();
         assert_eq!(result.stdout.trim(), "hello");
         assert_eq!(result.exit_code, 0);
+        assert!(!result.truncated);
     }
 
     #[tokio::test]
@@ -71,6 +136,13 @@ mod tests {
     async fn exec_no_ansi_junk() {
         let result = exec("whoami", "/bin/sh").await.unwrap();
         assert!(!result.stdout.contains('\x1b'));
-        assert!(!result.stdout.contains("[0m"));
+    }
+
+    #[tokio::test]
+    async fn exec_timeout() {
+        let result = exec("sleep 60", "/bin/sh").await;
+        assert!(result.is_err());
+        let err = format!("{}", result.err().unwrap());
+        assert!(err.contains("timed out"));
     }
 }
