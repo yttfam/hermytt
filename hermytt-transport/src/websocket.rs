@@ -3,29 +3,40 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use axum::Router;
-use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Path, State, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use hermytt_core::SessionManager;
-use tracing::info;
+use serde::Deserialize;
+use tracing::{info, warn};
 
 use crate::Transport;
 
 pub struct WebSocketTransport {
     pub port: u16,
     pub bind: String,
+    pub auth_token: Option<String>,
 }
 
 #[derive(Clone)]
 struct WsState {
     sessions: Arc<SessionManager>,
+    auth_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TokenQuery {
+    token: Option<String>,
 }
 
 #[async_trait]
 impl Transport for WebSocketTransport {
     async fn serve(self: Arc<Self>, sessions: Arc<SessionManager>) -> Result<()> {
-        let state = WsState { sessions };
+        let state = WsState {
+            sessions,
+            auth_token: self.auth_token.clone(),
+        };
 
         let app = Router::new()
             .route("/ws/{id}", get(ws_handler))
@@ -45,11 +56,30 @@ impl Transport for WebSocketTransport {
     }
 }
 
+fn check_auth(state: &WsState, query: &TokenQuery) -> bool {
+    match &state.auth_token {
+        None => true,
+        Some(expected) => query.token.as_deref() == Some(expected.as_str()),
+    }
+}
+
 async fn ws_handler(
     State(state): State<WsState>,
     Path(id): Path<String>,
+    Query(query): Query<TokenQuery>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    if !check_auth(&state, &query) {
+        warn!(transport = "websocket", "unauthorized connection attempt");
+        return ws.on_upgrade(|mut socket| async move {
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: 4401,
+                    reason: "unauthorized".into(),
+                })))
+                .await;
+        });
+    }
     ws.on_upgrade(move |socket| async move {
         let Some(handle) = state.sessions.get_session(&id).await else {
             return;
@@ -60,8 +90,20 @@ async fn ws_handler(
 
 async fn ws_handler_default(
     State(state): State<WsState>,
+    Query(query): Query<TokenQuery>,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    if !check_auth(&state, &query) {
+        warn!(transport = "websocket", "unauthorized connection attempt");
+        return ws.on_upgrade(|mut socket| async move {
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: 4401,
+                    reason: "unauthorized".into(),
+                })))
+                .await;
+        });
+    }
     ws.on_upgrade(move |socket| async move {
         let Ok(handle) = state.sessions.default_session().await else {
             return;
@@ -76,7 +118,6 @@ async fn handle_socket(mut socket: WebSocket, handle: hermytt_core::SessionHandl
 
     loop {
         tokio::select! {
-            // PTY output -> WebSocket
             result = output_rx.recv() => {
                 match result {
                     Ok(data) => {
@@ -88,7 +129,6 @@ async fn handle_socket(mut socket: WebSocket, handle: hermytt_core::SessionHandl
                     Err(_) => break,
                 }
             }
-            // WebSocket -> PTY stdin
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {

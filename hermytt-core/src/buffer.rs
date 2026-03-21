@@ -110,3 +110,73 @@ impl BufferedOutput {
         std::mem::take(&mut self.buf)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn raw_passthrough() {
+        let (tx, _) = broadcast::channel::<Vec<u8>>(16);
+        let mut buf = BufferedOutput::new(tx.subscribe(), Duration::ZERO);
+
+        tx.send(b"hello".to_vec()).unwrap();
+        tx.send(b"world".to_vec()).unwrap();
+
+        assert_eq!(buf.recv().await.unwrap(), b"hello");
+        assert_eq!(buf.recv().await.unwrap(), b"world");
+    }
+
+    #[tokio::test]
+    async fn raw_returns_none_on_close() {
+        let (tx, _) = broadcast::channel::<Vec<u8>>(16);
+        let mut buf = BufferedOutput::new(tx.subscribe(), Duration::ZERO);
+        drop(tx);
+        assert!(buf.recv().await.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn buffered_batches_within_window() {
+        let (tx, _) = broadcast::channel::<Vec<u8>>(16);
+        let mut buf = BufferedOutput::new(tx.subscribe(), Duration::from_millis(100));
+
+        tx.send(b"a".to_vec()).unwrap();
+        tx.send(b"b".to_vec()).unwrap();
+        tx.send(b"c".to_vec()).unwrap();
+
+        // Advance past the window.
+        tokio::time::advance(Duration::from_millis(150)).await;
+
+        let result = buf.recv().await.unwrap();
+        assert_eq!(result, b"abc");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn buffered_flushes_on_max_bytes() {
+        let (tx, _) = broadcast::channel::<Vec<u8>>(16);
+        let mut buf = BufferedOutput::new(tx.subscribe(), Duration::from_secs(10));
+        buf.max_bytes = 5;
+
+        tx.send(b"abc".to_vec()).unwrap();
+        tx.send(b"def".to_vec()).unwrap();
+
+        let result = buf.recv().await.unwrap();
+        assert_eq!(result, b"abcdef"); // 6 bytes >= 5, flushed immediately
+    }
+
+    #[tokio::test]
+    async fn buffered_flushes_remainder_on_close() {
+        let (tx, _) = broadcast::channel::<Vec<u8>>(16);
+        let mut buf = BufferedOutput::new(tx.subscribe(), Duration::from_secs(10));
+
+        tx.send(b"leftover".to_vec()).unwrap();
+        drop(tx);
+
+        // Should get the buffered data even though window hasn't expired.
+        let result = buf.recv().await.unwrap();
+        assert_eq!(result, b"leftover");
+
+        // Next call should return None.
+        assert!(buf.recv().await.is_none());
+    }
+}

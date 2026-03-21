@@ -1,4 +1,6 @@
+pub mod mqtt;
 pub mod rest;
+pub mod tcp;
 pub mod websocket;
 
 use std::sync::Arc;

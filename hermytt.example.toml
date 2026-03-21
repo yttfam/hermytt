@@ -1,7 +1,10 @@
 [server]
-bind = "0.0.0.0"
+bind = "127.0.0.1"    # use 0.0.0.0 to expose to network
 shell = "/bin/zsh"
 scrollback = 1000
+
+[auth]
+# token = "generate-with-hermytt-server-gen-token"
 
 [transport.rest]
 port = 7777
@@ -12,10 +15,8 @@ port = 7778
 # [transport.mqtt]
 # broker = "10.11.0.7"
 # port = 1883
+# username = "mqtt"
+# password = "from-vault"
 
 # [transport.tcp]
 # port = 7779
-
-# [transport.telegram]
-# bot_token from env: HERMYTT_TELEGRAM_TOKEN
-# chat_id = "1089362604"
