@@ -55,7 +55,8 @@ async fn handle_connection(
     if let Some(expected) = &auth_token {
         writer.write_all(b"token: ").await?;
         let mut line = String::new();
-        reader.read_line(&mut line).await?;
+        // Cap read to 512 bytes to prevent memory exhaustion before auth.
+        (&mut reader).take(512).read_line(&mut line).await?;
         let provided = line.trim();
         if provided != expected {
             warn!(transport = "tcp", "unauthorized connection");

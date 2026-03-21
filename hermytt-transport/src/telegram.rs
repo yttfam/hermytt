@@ -159,7 +159,8 @@ async fn poll_loop(
             };
 
             for chunk in chunk_message(&output) {
-                let formatted = format!("```\n{}\n```{}", chunk.trim_end(), suffix);
+                let escaped = html_escape(chunk.trim_end());
+                let formatted = format!("<pre>{}</pre>{}", escaped, suffix);
                 send_message(client, &send_url, chat_id, &formatted).await;
             }
         }
@@ -170,11 +171,17 @@ async fn send_message(client: &reqwest::Client, url: &str, chat_id: i64, text: &
     let req = SendMessageRequest {
         chat_id,
         text,
-        parse_mode: Some("Markdown"),
+        parse_mode: Some("HTML"),
     };
     if let Err(e) = client.post(url).json(&req).send().await {
         error!(transport = "telegram", error = %e, "send failed");
     }
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn chunk_message(text: &str) -> Vec<&str> {

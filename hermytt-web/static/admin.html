@@ -196,7 +196,7 @@ async function refreshSessions() {
       <td>${s.id.slice(0, 8)}</td>
       <td><span class="badge badge-green">active</span></td>
       <td>
-        <a href="/?token=${TOKEN}#${s.id}" class="btn">open</a>
+        <a href="/?token=${encodeURIComponent(TOKEN)}#${encodeURIComponent(s.id)}" class="btn">open</a>
       </td>
     </tr>
   `).join('') || '<tr><td colspan="3" style="color:#6f6f8f">no sessions</td></tr>';
