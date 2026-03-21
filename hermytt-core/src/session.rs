@@ -38,10 +38,11 @@ impl SessionHandle {
     pub async fn execute(&self, cmd: &str, silence: std::time::Duration) -> Result<Vec<u8>> {
         let mut rx = self.output_tx.subscribe();
 
-        // Send the command.
+        // Send the command + carriage return (Enter).
+        // \r works for both line-buffered shells (PTY translates) and raw-mode apps.
         let mut input = cmd.to_string();
-        if !input.ends_with('\n') {
-            input.push('\n');
+        if !input.ends_with('\r') && !input.ends_with('\n') {
+            input.push('\r');
         }
         self.stdin_tx
             .send(input.into_bytes())

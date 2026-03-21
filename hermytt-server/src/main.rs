@@ -123,16 +123,9 @@ async fn start_server(
     let mut tasks = Vec::new();
 
     if let Some(rest_config) = &config.transport.rest {
-        let ws_port = config
-            .transport
-            .websocket
-            .as_ref()
-            .map(|c| c.port)
-            .unwrap_or(7778);
         let transport = Arc::new(RestTransport {
             port: rest_config.port,
             bind: config.server.bind.clone(),
-            ws_port,
             auth_token: auth_token.clone(),
         });
         let sessions = sessions.clone();
