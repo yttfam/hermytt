@@ -1,0 +1,15 @@
+[package]
+name = "hermytt-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+portable-pty.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+serde.workspace = true

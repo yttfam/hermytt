@@ -1,0 +1,21 @@
+[server]
+bind = "0.0.0.0"
+shell = "/bin/zsh"
+scrollback = 1000
+
+[transport.rest]
+port = 7777
+
+[transport.websocket]
+port = 7778
+
+# [transport.mqtt]
+# broker = "10.11.0.7"
+# port = 1883
+
+# [transport.tcp]
+# port = 7779
+
+# [transport.telegram]
+# bot_token from env: HERMYTT_TELEGRAM_TOKEN
+# chat_id = "1089362604"
