@@ -85,6 +85,7 @@ impl Transport for RestTransport {
             .route("/exec", post(exec_default))
             .route("/config", get(get_config))
             .route("/config", axum::routing::put(save_config))
+            .route("/restart", post(restart_server))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -212,6 +213,17 @@ async fn save_config(
 
     info!("config saved to {}", path);
     Ok(Json(serde_json::json!({"status": "saved", "restart_required": true})))
+}
+
+async fn restart_server() -> StatusCode {
+    info!("restart requested via admin API");
+    // Give the response time to flush, then exit.
+    // The process supervisor (systemd, launchd, docker) restarts us.
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        std::process::exit(0);
+    });
+    StatusCode::OK
 }
 
 async fn create_session(

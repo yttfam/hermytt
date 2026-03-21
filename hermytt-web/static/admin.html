@@ -84,7 +84,10 @@
   <div class="card">
     <div class="card-header">
       <h2>Transports</h2>
-      <button class="btn btn-primary btn-sm" id="btn-save-transports">save &amp; restart required</button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" id="btn-save-transports">save</button>
+        <button class="btn btn-sm" id="btn-restart" style="display:none;background:#78350f;border-color:#78350f;color:#fbbf24">restart now</button>
+      </div>
     </div>
     <div class="card-body">
       <table><tbody id="transports-table"></tbody></table>
@@ -321,6 +324,35 @@ document.getElementById('btn-save-transports').addEventListener('click', async (
   dirty = false;
   renderTransports();
   banner('saved — restart hermytt to apply changes', 'warn');
+  document.getElementById('btn-restart').style.display = 'inline-block';
+});
+
+document.getElementById('btn-restart').addEventListener('click', async () => {
+  if (!confirm('Restart hermytt? All active sessions will be terminated.')) return;
+  banner('restarting...', 'warn');
+  await fetch('/restart', { method: 'POST', headers: authHeaders() });
+  // Server is dying — poll until it comes back.
+  document.getElementById('btn-restart').style.display = 'none';
+  let attempts = 0;
+  const poll = setInterval(async () => {
+    attempts++;
+    try {
+      const res = await fetch('/info', { headers: authHeaders() });
+      if (res.ok) {
+        clearInterval(poll);
+        banner('restarted', 'ok');
+        setTimeout(() => { document.getElementById('status-banner').className = 'status-msg'; }, 3000);
+        loadConfig();
+        refreshSessions();
+        refreshInfo();
+      }
+    } catch(e) {
+      if (attempts > 30) {
+        clearInterval(poll);
+        banner('server did not come back — check process supervisor', 'err');
+      }
+    }
+  }, 1000);
 });
 
 // Sessions
