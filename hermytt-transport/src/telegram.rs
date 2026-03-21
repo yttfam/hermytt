@@ -1,17 +1,13 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use hermytt_core::SessionManager;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::Transport;
 
-const SILENCE_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_MESSAGE_LEN: usize = 4000;
 
 pub struct TelegramTransport {
@@ -21,13 +17,13 @@ pub struct TelegramTransport {
 
 #[async_trait]
 impl Transport for TelegramTransport {
-    async fn serve(self: Arc<Self>, sessions: Arc<SessionManager>) -> Result<()> {
+    async fn serve(self: Arc<Self>, _sessions: Arc<SessionManager>) -> Result<()> {
         let client = reqwest::Client::new();
         let base_url = format!("https://api.telegram.org/bot{}", self.bot_token);
 
         info!(transport = "telegram", "starting long poll");
 
-        poll_loop(&client, &base_url, &self.chat_ids, &sessions).await;
+        poll_loop(&client, &base_url, &self.chat_ids).await;
 
         Ok(())
     }
@@ -67,28 +63,14 @@ struct SendMessageRequest<'a> {
     parse_mode: Option<&'a str>,
 }
 
-/// Per-chat state: which session is attached.
-struct ChatState {
-    session_id: Option<String>,
-}
-
-impl Default for ChatState {
-    fn default() -> Self {
-        Self { session_id: None }
-    }
-}
-
 async fn poll_loop(
     client: &reqwest::Client,
     base_url: &str,
     allowed_chats: &[i64],
-    sessions: &Arc<SessionManager>,
 ) {
     let poll_url = format!("{}/getUpdates", base_url);
     let send_url = format!("{}/sendMessage", base_url);
     let mut offset: i64 = 0;
-    let chat_states: Arc<Mutex<HashMap<i64, ChatState>>> =
-        Arc::new(Mutex::new(HashMap::new()));
 
     loop {
         let resp = client
@@ -105,18 +87,18 @@ async fn poll_loop(
                 Ok(tg) if tg.ok => tg.result.unwrap_or_default(),
                 Ok(_) => {
                     warn!(transport = "telegram", "API returned ok=false");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     continue;
                 }
                 Err(e) => {
                     error!(transport = "telegram", error = %e, "parse error");
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     continue;
                 }
             },
             Err(e) => {
                 error!(transport = "telegram", error = %e, "poll failed");
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
         };
@@ -133,176 +115,54 @@ async fn poll_loop(
                 continue;
             }
 
-            // Commands.
-            if text.starts_with('/') {
-                let parts: Vec<&str> = text.splitn(2, ' ').collect();
-                let cmd = parts[0];
-                let arg = parts.get(1).map(|s| s.trim()).unwrap_or("");
-
-                match cmd {
-                    "/sessions" => {
-                        let ids = sessions.list_sessions().await;
-                        let current = {
-                            let states = chat_states.lock().await;
-                            states.get(&chat_id).and_then(|s| s.session_id.clone())
-                        };
-                        let lines: Vec<String> = ids
-                            .iter()
-                            .map(|id| {
-                                let marker = if current.as_deref() == Some(id.as_str()) {
-                                    " ◀"
-                                } else {
-                                    ""
-                                };
-                                format!("• {}{}", &id[..8.min(id.len())], marker)
-                            })
-                            .collect();
-                        let msg = if lines.is_empty() {
-                            "no sessions".to_string()
-                        } else {
-                            lines.join("\n")
-                        };
-                        send_message(client, &send_url, chat_id, &msg).await;
-                    }
-                    "/attach" => {
-                        if arg.is_empty() {
-                            send_message(client, &send_url, chat_id, "usage: /attach <session_id>")
-                                .await;
-                            continue;
-                        }
-                        let ids = sessions.list_sessions().await;
-                        let matched: Vec<&String> =
-                            ids.iter().filter(|id| id.starts_with(arg)).collect();
-                        match matched.len() {
-                            0 => {
-                                send_message(
-                                    client,
-                                    &send_url,
-                                    chat_id,
-                                    &format!("no session matching '{}'", arg),
-                                )
-                                .await;
-                            }
-                            1 => {
-                                let sid = matched[0].clone();
-                                let mut states = chat_states.lock().await;
-                                let state = states.entry(chat_id).or_default();
-                                state.session_id = Some(sid.clone());
-                                drop(states);
-                                send_message(
-                                    client,
-                                    &send_url,
-                                    chat_id,
-                                    &format!("attached to {}", &sid[..8]),
-                                )
-                                .await;
-                            }
-                            _ => {
-                                let options: Vec<String> =
-                                    matched.iter().map(|id| id[..8].to_string()).collect();
-                                send_message(
-                                    client,
-                                    &send_url,
-                                    chat_id,
-                                    &format!("ambiguous, matches: {}", options.join(", ")),
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                    "/new" => match sessions.create_session().await {
-                        Ok(handle) => {
-                            let sid = handle.id.clone();
-                            let mut states = chat_states.lock().await;
-                            let state = states.entry(chat_id).or_default();
-                            state.session_id = Some(sid.clone());
-                            drop(states);
-                            send_message(
-                                client,
-                                &send_url,
-                                chat_id,
-                                &format!("created and attached to {}", &sid[..8]),
-                            )
-                            .await;
-                        }
-                        Err(e) => {
-                            send_message(client, &send_url, chat_id, &format!("failed: {}", e))
-                                .await;
-                        }
-                    },
-                    "/detach" => {
-                        let mut states = chat_states.lock().await;
-                        let state = states.entry(chat_id).or_default();
-                        state.session_id = None;
-                        drop(states);
-                        send_message(client, &send_url, chat_id, "detached — using default session")
-                            .await;
-                    }
-                    "/help" | "/start" => {
-                        send_message(
-                            client,
-                            &send_url,
-                            chat_id,
-                            concat!(
-                                "hermytt — send any text to execute as a shell command\n\n",
-                                "/sessions — list sessions\n",
-                                "/attach <id> — attach to a session\n",
-                                "/new — create + attach new session\n",
-                                "/detach — back to default session\n",
-                                "/help — this message",
-                            ),
-                        )
-                        .await;
-                    }
-                    _ => {
-                        send_message(client, &send_url, chat_id, "unknown command — /help").await;
-                    }
+            match text.as_str() {
+                "/help" | "/start" => {
+                    send_message(
+                        client,
+                        &send_url,
+                        chat_id,
+                        "hermytt — send any text to run as a shell command",
+                    )
+                    .await;
+                    continue;
                 }
-                continue;
+                _ => {}
             }
 
-            // Regular text = execute as shell command.
-            let session_id = {
-                let states = chat_states.lock().await;
-                states.get(&chat_id).and_then(|s| s.session_id.clone())
-            };
-
-            let Some(handle) = get_handle(sessions, session_id.as_deref()).await else {
-                send_message(client, &send_url, chat_id, "session not found").await;
-                continue;
-            };
-
-            let output = match handle.execute(&text, SILENCE_TIMEOUT).await {
-                Ok(data) => data,
+            // Execute directly via sh -c.
+            let shell = hermytt_core::platform::default_shell();
+            let result = match hermytt_core::exec(&text, shell).await {
+                Ok(r) => r,
                 Err(e) => {
-                    error!(transport = "telegram", error = %e, "execute failed");
+                    error!(transport = "telegram", error = %e, "exec failed");
+                    send_message(client, &send_url, chat_id, &format!("error: {}", e)).await;
                     continue;
                 }
             };
 
-            let raw = String::from_utf8_lossy(&output);
-            let clean = clean_output(&raw, &text);
+            let output = result.combined();
 
-            if clean.trim().is_empty() {
-                send_message(client, &send_url, chat_id, "(no output)").await;
+            if output.trim().is_empty() {
+                let msg = if result.exit_code == 0 {
+                    "(no output)".to_string()
+                } else {
+                    format!("(exit {})", result.exit_code)
+                };
+                send_message(client, &send_url, chat_id, &msg).await;
                 continue;
             }
 
-            for chunk in chunk_message(&clean) {
-                let formatted = format!("```\n{}\n```", chunk);
+            let suffix = if result.exit_code != 0 {
+                format!("\n(exit {})", result.exit_code)
+            } else {
+                String::new()
+            };
+
+            for chunk in chunk_message(&output) {
+                let formatted = format!("```\n{}\n```{}", chunk.trim_end(), suffix);
                 send_message(client, &send_url, chat_id, &formatted).await;
             }
         }
-    }
-}
-
-async fn get_handle(
-    sessions: &Arc<SessionManager>,
-    session_id: Option<&str>,
-) -> Option<hermytt_core::SessionHandle> {
-    match session_id {
-        Some(id) => sessions.get_session(id).await,
-        None => sessions.default_session().await.ok(),
     }
 }
 
@@ -315,79 +175,6 @@ async fn send_message(client: &reqwest::Client, url: &str, chat_id: i64, text: &
     if let Err(e) = client.post(url).json(&req).send().await {
         error!(transport = "telegram", error = %e, "send failed");
     }
-}
-
-/// Clean PTY output for display: strip ANSI, remove the echoed command, remove prompt lines.
-pub fn clean_output(raw: &str, _command: &str) -> String {
-    let stripped = strip_ansi(raw);
-    let lines: Vec<&str> = stripped.lines().collect();
-
-    lines
-        .iter()
-        .skip(1)
-        .filter(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                return false;
-            }
-            if matches!(trimmed, "%" | "$" | "#") {
-                return false;
-            }
-            if trimmed.ends_with('%')
-                || trimmed.ends_with('$')
-                || trimmed.ends_with("% ")
-                || trimmed.ends_with("$ ")
-                || trimmed.ends_with("# ")
-            {
-                return false;
-            }
-            true
-        })
-        .copied()
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Strip ANSI escape sequences and terminal control codes.
-pub fn strip_ansi(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&ch) = chars.peek() {
-                    chars.next();
-                    if ch.is_ascii_alphabetic() || ch == '~' || ch == '@' {
-                        break;
-                    }
-                }
-            } else if chars.peek() == Some(&']') {
-                chars.next();
-                while let Some(&ch) = chars.peek() {
-                    chars.next();
-                    if ch == '\x07' {
-                        break;
-                    }
-                    if ch == '\x1b' && chars.peek() == Some(&'\\') {
-                        chars.next();
-                        break;
-                    }
-                }
-            } else {
-                chars.next();
-            }
-        } else if c == '\r' {
-            continue;
-        } else if c.is_ascii_control() && c != '\n' && c != '\t' {
-            continue;
-        } else {
-            out.push(c);
-        }
-    }
-
-    out
 }
 
 fn chunk_message(text: &str) -> Vec<&str> {
@@ -440,39 +227,5 @@ mod tests {
         let chunks = chunk_message(&text);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].len(), MAX_MESSAGE_LEN);
-    }
-
-    #[test]
-    fn strip_csi() {
-        assert_eq!(strip_ansi("\x1b[32mhello\x1b[0m"), "hello");
-    }
-
-    #[test]
-    fn strip_bracket_paste() {
-        assert_eq!(strip_ansi("\x1b[?2004hwhoami\x1b[?2004l"), "whoami");
-    }
-
-    #[test]
-    fn strip_cr() {
-        assert_eq!(strip_ansi("hello\r\nworld"), "hello\nworld");
-    }
-
-    #[test]
-    fn strip_preserves_text() {
-        assert_eq!(strip_ansi("a\n\tb"), "a\n\tb");
-    }
-
-    #[test]
-    fn clean_removes_echo_and_prompt() {
-        let raw = "uptime\r\n 17:39  up 13 days\r\ncali@mini ~ %\r\n";
-        let clean = clean_output(raw, "uptime");
-        assert_eq!(clean.trim(), "17:39  up 13 days");
-    }
-
-    #[test]
-    fn clean_no_output() {
-        let raw = "cd /tmp\r\ncali@mini /tmp %\r\n";
-        let clean = clean_output(raw, "cd /tmp");
-        assert!(clean.trim().is_empty());
     }
 }

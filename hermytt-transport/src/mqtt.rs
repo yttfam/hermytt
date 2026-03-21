@@ -9,8 +9,6 @@ use tracing::{error, info, warn};
 
 use crate::Transport;
 
-const SILENCE_TIMEOUT: Duration = Duration::from_millis(500);
-
 pub struct MqttTransport {
     pub broker_host: String,
     pub broker_port: u16,
@@ -76,41 +74,29 @@ async fn request_loop(
     loop {
         match eventloop.poll().await {
             Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(publish))) => {
-                let Some(session_id) = parse_input_topic(&publish.topic) else {
-                    continue;
-                };
-
-                let handle = if session_id == "default" {
-                    sessions.default_session().await.ok()
-                } else {
-                    sessions.get_session(session_id).await
-                };
-
-                let Some(handle) = handle else {
-                    warn!(topic = %publish.topic, "message for unknown session");
+                let Some(_session_id) = parse_input_topic(&publish.topic) else {
                     continue;
                 };
 
                 let cmd = String::from_utf8_lossy(&publish.payload).to_string();
                 let out_topic = publish.topic.replace("/in", "/out");
 
-                // Execute and publish response.
+                // Execute directly (no PTY) and publish response.
                 let client = client.clone();
-                let handle = handle.clone();
                 tokio::spawn(async move {
-                    match handle.execute(&cmd, SILENCE_TIMEOUT).await {
-                        Ok(data) => {
-                            let raw = String::from_utf8_lossy(&data);
-                            let clean = crate::telegram::clean_output(&raw, &cmd);
+                    let shell = hermytt_core::platform::default_shell();
+                    match hermytt_core::exec(&cmd, shell).await {
+                        Ok(result) => {
+                            let output = result.combined();
                             if let Err(e) = client
-                                .publish(&out_topic, QoS::AtMostOnce, false, clean.as_bytes())
+                                .publish(&out_topic, QoS::AtMostOnce, false, output.as_bytes())
                                 .await
                             {
                                 error!(error = %e, topic = %out_topic, "publish failed");
                             }
                         }
                         Err(e) => {
-                            error!(error = %e, "execute failed");
+                            error!(error = %e, "exec failed");
                         }
                     }
                 });

@@ -281,46 +281,40 @@ async fn handle_ws_socket(mut socket: WebSocket, handle: hermytt_core::SessionHa
     info!(session = %handle.id, "websocket client disconnected");
 }
 
-/// Execute a command and return the output (request-response pattern).
-const EXEC_SILENCE: Duration = Duration::from_millis(500);
+/// Execute a command directly (no PTY) and return clean output.
 
 #[derive(Serialize)]
 struct ExecResponse {
-    output: String,
+    stdout: String,
+    stderr: String,
+    exit_code: i32,
 }
 
 async fn exec_default(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Json(body): Json<StdinBody>,
 ) -> Result<Json<ExecResponse>, StatusCode> {
-    let Ok(handle) = state.sessions.default_session().await else {
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    };
-    exec_on_handle(&handle, &body.input).await
+    run_exec(&body.input).await
 }
 
 async fn exec_session(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
+    State(_state): State<AppState>,
+    Path(_id): Path<String>,
     Json(body): Json<StdinBody>,
 ) -> Result<Json<ExecResponse>, StatusCode> {
-    let Some(handle) = state.sessions.get_session(&id).await else {
-        return Err(StatusCode::NOT_FOUND);
-    };
-    exec_on_handle(&handle, &body.input).await
+    run_exec(&body.input).await
 }
 
-async fn exec_on_handle(
-    handle: &hermytt_core::SessionHandle,
-    cmd: &str,
-) -> Result<Json<ExecResponse>, StatusCode> {
-    let raw = handle
-        .execute(cmd, EXEC_SILENCE)
+async fn run_exec(cmd: &str) -> Result<Json<ExecResponse>, StatusCode> {
+    let shell = hermytt_core::platform::default_shell();
+    let result = hermytt_core::exec(cmd, shell)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let text = String::from_utf8_lossy(&raw);
-    let clean = crate::telegram::clean_output(&text, cmd);
-    Ok(Json(ExecResponse { output: clean }))
+    Ok(Json(ExecResponse {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exit_code: result.exit_code,
+    }))
 }
 
 /// SSE buffer window — accumulate PTY output for this long before sending.
