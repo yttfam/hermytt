@@ -155,6 +155,7 @@ async fn start_server(
             auth_token: auth_token.clone(),
             shell: config.server.shell.clone(),
             transport_info: transport_info.clone(),
+            config_path: config_path.map(String::from),
         });
         let sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {

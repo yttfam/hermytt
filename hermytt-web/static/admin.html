@@ -6,150 +6,95 @@
 <title>hermytt admin</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: #0a0a0a;
-    color: #e0e0e0;
-    font-family: 'Inter', -apple-system, system-ui, sans-serif;
-    font-size: 14px;
-    min-height: 100vh;
-  }
+  body { background: #0a0a0a; color: #e0e0e0; font-family: -apple-system, system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
   a { color: #60a5fa; text-decoration: none; }
   a:hover { text-decoration: underline; }
-  #header {
-    background: #1a1a2e;
-    padding: 16px 24px;
-    border-bottom: 1px solid #2a2a3e;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-  #header h1 {
-    font-family: monospace;
-    font-size: 18px;
-    color: #c0c0e0;
-    font-weight: bold;
-  }
+  #header { background: #1a1a2e; padding: 16px 24px; border-bottom: 1px solid #2a2a3e; display: flex; justify-content: space-between; align-items: center; }
+  #header h1 { font-family: monospace; font-size: 18px; color: #c0c0e0; }
   #header h1 span { color: #4a4a6e; font-weight: normal; }
   #header nav { display: flex; gap: 16px; }
   .container { max-width: 900px; margin: 0 auto; padding: 24px; }
-  .card {
-    background: #12121f;
-    border: 1px solid #2a2a3e;
-    border-radius: 8px;
-    margin-bottom: 20px;
-    overflow: hidden;
-  }
-  .card-header {
-    padding: 12px 16px;
-    background: #1a1a2e;
-    border-bottom: 1px solid #2a2a3e;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+  .card { background: #12121f; border: 1px solid #2a2a3e; border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
+  .card-header { padding: 12px 16px; background: #1a1a2e; border-bottom: 1px solid #2a2a3e; display: flex; justify-content: space-between; align-items: center; }
   .card-header h2 { font-size: 14px; color: #9f9fbf; text-transform: uppercase; letter-spacing: 0.5px; }
   .card-body { padding: 16px; }
-  .badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-family: monospace;
-  }
-  .badge-green { background: #064e3b; color: #4ade80; }
-  .badge-yellow { background: #78350f; color: #fbbf24; }
-  .badge-red { background: #7f1d1d; color: #fca5a5; }
-  .badge-blue { background: #1e3a5f; color: #60a5fa; }
-  table { width: 100%; border-collapse: collapse; }
-  th { text-align: left; padding: 8px 12px; color: #6f6f8f; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #2a2a3e; }
-  td { padding: 10px 12px; border-bottom: 1px solid #1a1a2e; font-family: monospace; font-size: 13px; }
-  tr:last-child td { border-bottom: none; }
-  .btn {
-    background: #1a1a2e;
-    border: 1px solid #2a2a3e;
-    color: #9f9fbf;
-    padding: 6px 14px;
-    font-family: monospace;
-    font-size: 13px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
+  .btn { background: #1a1a2e; border: 1px solid #2a2a3e; color: #9f9fbf; padding: 6px 14px; font-family: monospace; font-size: 13px; border-radius: 4px; cursor: pointer; transition: all 0.15s; }
   .btn:hover { background: #2a2a3e; color: #e0e0e0; }
-  .btn-danger:hover { background: #7f1d1d; color: #fca5a5; border-color: #7f1d1d; }
+  .btn-sm { padding: 3px 10px; font-size: 12px; }
   .btn-primary { background: #1e3a5f; border-color: #1e3a5f; color: #60a5fa; }
   .btn-primary:hover { background: #2563eb; color: #fff; }
-  .exec-box { display: flex; gap: 8px; margin-top: 12px; }
-  .exec-box input {
-    flex: 1;
-    background: #0a0a0a;
-    border: 1px solid #2a2a3e;
-    color: #e0e0e0;
-    padding: 8px 12px;
-    font-family: monospace;
-    font-size: 13px;
-    border-radius: 4px;
-    outline: none;
-  }
-  .exec-box input:focus { border-color: #60a5fa; }
-  #exec-output {
-    margin-top: 12px;
-    background: #0a0a0a;
-    border: 1px solid #2a2a3e;
-    border-radius: 4px;
-    padding: 12px;
-    font-family: monospace;
-    font-size: 13px;
-    white-space: pre-wrap;
-    display: none;
-    max-height: 300px;
-    overflow-y: auto;
-  }
   .stat { text-align: center; }
   .stat .value { font-size: 28px; font-weight: bold; color: #c0c0e0; font-family: monospace; }
   .stat .label { color: #6f6f8f; font-size: 12px; margin-top: 4px; }
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 8px 12px; color: #6f6f8f; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #2a2a3e; }
+  td { padding: 10px 12px; border-bottom: 1px solid #1a1a2e; font-family: monospace; font-size: 13px; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot-green { background: #4ade80; }
+  .dot-gray { background: #555; }
+  .dot-red { background: #ff6b6b; }
+  .toggle { position: relative; width: 36px; height: 20px; display: inline-block; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle .slider { position: absolute; inset: 0; background: #2a2a3e; border-radius: 20px; cursor: pointer; transition: 0.2s; }
+  .toggle .slider:before { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; bottom: 2px; background: #6f6f8f; border-radius: 50%; transition: 0.2s; }
+  .toggle input:checked + .slider { background: #1e3a5f; }
+  .toggle input:checked + .slider:before { transform: translateX(16px); background: #60a5fa; }
+  .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: center; }
+  .modal-bg.active { display: flex; }
+  .modal { background: #12121f; border: 1px solid #2a2a3e; border-radius: 8px; padding: 24px; width: 450px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+  .modal h3 { color: #c0c0e0; margin-bottom: 16px; font-size: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; color: #6f6f8f; margin-bottom: 4px; text-transform: uppercase; }
+  .field input { width: 100%; background: #0a0a0a; border: 1px solid #2a2a3e; color: #e0e0e0; padding: 8px 10px; font-family: monospace; font-size: 13px; border-radius: 4px; outline: none; }
+  .field input:focus { border-color: #60a5fa; }
+  .field .hint { font-size: 11px; color: #4a4a6e; margin-top: 2px; }
+  .field .error { font-size: 11px; color: #ff6b6b; margin-top: 2px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+  .status-msg { font-size: 12px; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; display: none; }
+  .status-msg.ok { display: block; background: #064e3b; color: #4ade80; }
+  .status-msg.warn { display: block; background: #78350f; color: #fbbf24; }
+  .status-msg.err { display: block; background: #7f1d1d; color: #fca5a5; }
+  .exec-box { display: flex; gap: 8px; }
+  .exec-box input { flex: 1; background: #0a0a0a; border: 1px solid #2a2a3e; color: #e0e0e0; padding: 8px 12px; font-family: monospace; font-size: 13px; border-radius: 4px; outline: none; }
+  .exec-box input:focus { border-color: #60a5fa; }
+  #exec-output { margin-top: 12px; background: #0a0a0a; border: 1px solid #2a2a3e; border-radius: 4px; padding: 12px; font-family: monospace; font-size: 13px; white-space: pre-wrap; display: none; max-height: 300px; overflow-y: auto; }
 </style>
 </head>
 <body>
 <div id="header">
   <h1>hermytt <span>admin</span></h1>
-  <nav>
-    <a href="/">terminal</a>
-    <a href="/admin">admin</a>
-  </nav>
+  <nav><a href="/">terminal</a> <a href="/admin">admin</a></nav>
 </div>
 <div class="container">
+  <div id="status-banner" class="status-msg"></div>
+
   <div class="card">
     <div class="card-header"><h2>Overview</h2></div>
     <div class="card-body">
       <div class="stats-grid">
-        <div class="stat">
-          <div class="value" id="stat-sessions">-</div>
-          <div class="label">sessions</div>
-        </div>
-        <div class="stat">
-          <div class="value" id="stat-uptime">-</div>
-          <div class="label">server</div>
-        </div>
-        <div class="stat">
-          <div class="value" id="stat-shell">-</div>
-          <div class="label">shell</div>
-        </div>
+        <div class="stat"><div class="value" id="stat-sessions">-</div><div class="label">sessions</div></div>
+        <div class="stat"><div class="value" id="stat-uptime">-</div><div class="label">server</div></div>
+        <div class="stat"><div class="value" id="stat-shell">-</div><div class="label">shell</div></div>
       </div>
     </div>
   </div>
 
   <div class="card">
     <div class="card-header">
-      <h2>Sessions</h2>
-      <button class="btn btn-primary" id="btn-new-session">+ new session</button>
+      <h2>Transports</h2>
+      <button class="btn btn-primary btn-sm" id="btn-save-transports">save &amp; restart required</button>
     </div>
     <div class="card-body">
-      <table>
-        <thead><tr><th>ID</th><th>Status</th><th></th></tr></thead>
-        <tbody id="sessions-table"></tbody>
-      </table>
+      <table><tbody id="transports-table"></tbody></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Sessions</h2> <button class="btn btn-primary btn-sm" id="btn-new-session">+ new</button></div>
+    <div class="card-body">
+      <table><thead><tr><th>ID</th><th>Status</th><th></th></tr></thead><tbody id="sessions-table"></tbody></table>
     </div>
   </div>
 
@@ -163,48 +108,232 @@
       <div id="exec-output"></div>
     </div>
   </div>
+</div>
 
-  <div class="card">
-    <div class="card-header"><h2>Transports</h2></div>
-    <div class="card-body">
-      <table>
-        <thead><tr><th>Transport</th><th>Status</th><th>Endpoint</th></tr></thead>
-        <tbody id="transports-table"></tbody>
-      </table>
+<!-- Edit modal -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal" id="modal">
+    <h3 id="modal-title">Edit Transport</h3>
+    <div id="modal-fields"></div>
+    <div class="modal-actions">
+      <button class="btn" id="modal-cancel">cancel</button>
+      <button class="btn btn-primary" id="modal-save">save</button>
     </div>
   </div>
 </div>
 
 <script>
 const urlToken = new URLSearchParams(location.search).get('token');
-if (urlToken) {
-  sessionStorage.setItem('hermytt-token', urlToken);
-  const clean = new URL(location);
-  clean.searchParams.delete('token');
-  history.replaceState(null, '', clean);
-}
+if (urlToken) { sessionStorage.setItem('hermytt-token', urlToken); const u = new URL(location); u.searchParams.delete('token'); history.replaceState(null,'',u); }
 const TOKEN = sessionStorage.getItem('hermytt-token') || '';
+function authHeaders() { const h = {'Content-Type':'application/json'}; if (TOKEN) h['X-Hermytt-Key'] = TOKEN; return h; }
+const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
 
-function authHeaders() {
-  const h = { 'Content-Type': 'application/json' };
-  if (TOKEN) h['X-Hermytt-Key'] = TOKEN;
-  return h;
+let config = null;
+let dirty = false;
+
+// Transport definitions: what fields each one has.
+const TRANSPORT_DEFS = {
+  rest:     { label: 'REST + WebSocket', fields: [
+    { key: 'port', label: 'Port', type: 'number', required: true, default: 7777 },
+  ]},
+  mqtt:     { label: 'MQTT', fields: [
+    { key: 'broker', label: 'Broker host', type: 'text', required: true, placeholder: 'mqtt.example.com' },
+    { key: 'port', label: 'Port', type: 'number', default: 1883 },
+    { key: 'username', label: 'Username', type: 'text' },
+    { key: 'password', label: 'Password', type: 'password' },
+  ]},
+  tcp:      { label: 'TCP (netcat)', fields: [
+    { key: 'port', label: 'Port', type: 'number', required: true, default: 7779 },
+  ]},
+  telegram: { label: 'Telegram', fields: [
+    { key: 'bot_token', label: 'Bot token', type: 'password', required: true, placeholder: '123456:ABC...' },
+    { key: 'chat_ids', label: 'Allowed chat IDs', type: 'text', placeholder: '123456789, 987654321', hint: 'comma-separated, empty = allow all' },
+  ]},
+};
+
+function banner(msg, cls) {
+  const el = document.getElementById('status-banner');
+  el.textContent = msg;
+  el.className = 'status-msg ' + cls;
 }
+
+async function loadConfig() {
+  try {
+    const res = await fetch('/config', { headers: authHeaders() });
+    if (res.status === 404) { config = {}; return; }
+    if (!res.ok) return;
+    config = await res.json();
+  } catch(e) { config = {}; }
+  renderTransports();
+}
+
+function isEnabled(name) {
+  return config?.transport?.[name] != null;
+}
+
+function getTransportConfig(name) {
+  return config?.transport?.[name] || {};
+}
+
+function renderTransports() {
+  const tbody = document.getElementById('transports-table');
+  tbody.innerHTML = Object.entries(TRANSPORT_DEFS).map(([name, def]) => {
+    const enabled = isEnabled(name);
+    const cfg = getTransportConfig(name);
+    const statusDot = enabled ? 'dot-green' : 'dot-gray';
+    const statusText = enabled ? 'active' : 'disabled';
+    let endpoint = '-';
+    if (enabled) {
+      if (cfg.port) endpoint = ':' + cfg.port;
+      else if (cfg.broker) endpoint = cfg.broker + ':' + (cfg.port || 1883);
+      else if (cfg.bot_token) endpoint = 'bot API';
+    }
+    return `
+      <tr>
+        <td>
+          <label class="toggle">
+            <input type="checkbox" data-transport="${esc(name)}" ${enabled ? 'checked' : ''}>
+            <span class="slider"></span>
+          </label>
+        </td>
+        <td><span class="dot ${statusDot}"></span>${esc(def.label)}</td>
+        <td style="color:#6f6f8f">${esc(endpoint)}</td>
+        <td style="text-align:right">
+          <button class="btn btn-sm" data-edit="${esc(name)}" ${!enabled ? 'disabled style="opacity:0.3"' : ''}>edit</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  // Toggle handlers.
+  tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const name = cb.dataset.transport;
+      if (!config.transport) config.transport = {};
+      if (cb.checked) {
+        // Enable with defaults.
+        const def = TRANSPORT_DEFS[name];
+        const defaults = {};
+        def.fields.forEach(f => { if (f.default != null) defaults[f.key] = f.default; });
+        config.transport[name] = defaults;
+      } else {
+        delete config.transport[name];
+      }
+      dirty = true;
+      renderTransports();
+    });
+  });
+
+  // Edit handlers.
+  tbody.querySelectorAll('[data-edit]').forEach(btn => {
+    btn.addEventListener('click', () => openEditModal(btn.dataset.edit));
+  });
+
+  document.getElementById('btn-save-transports').style.opacity = dirty ? 1 : 0.3;
+}
+
+// Modal
+function openEditModal(name) {
+  const def = TRANSPORT_DEFS[name];
+  const cfg = getTransportConfig(name);
+  document.getElementById('modal-title').textContent = 'Edit ' + def.label;
+  const fields = document.getElementById('modal-fields');
+
+  fields.innerHTML = def.fields.map(f => {
+    let val = cfg[f.key] ?? '';
+    // chat_ids is an array, show as comma-separated.
+    if (f.key === 'chat_ids' && Array.isArray(val)) val = val.join(', ');
+    return `
+      <div class="field">
+        <label>${esc(f.label)}${f.required ? ' *' : ''}</label>
+        <input type="${f.type || 'text'}" data-key="${esc(f.key)}" value="${esc(String(val))}" placeholder="${esc(f.placeholder || '')}">
+        ${f.hint ? '<div class="hint">' + esc(f.hint) + '</div>' : ''}
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('modal-bg').classList.add('active');
+
+  document.getElementById('modal-save').onclick = () => {
+    const updated = {};
+    let valid = true;
+    fields.querySelectorAll('input').forEach(input => {
+      const key = input.dataset.key;
+      const fieldDef = def.fields.find(f => f.key === key);
+      let val = input.value.trim();
+
+      // Remove old errors.
+      input.parentElement.querySelector('.error')?.remove();
+
+      if (fieldDef.required && !val) {
+        const err = document.createElement('div');
+        err.className = 'error';
+        err.textContent = 'required';
+        input.parentElement.appendChild(err);
+        valid = false;
+        return;
+      }
+
+      if (!val) return;
+
+      if (fieldDef.type === 'number') {
+        const n = parseInt(val);
+        if (isNaN(n) || n < 1 || n > 65535) {
+          const err = document.createElement('div');
+          err.className = 'error';
+          err.textContent = 'must be 1-65535';
+          input.parentElement.appendChild(err);
+          valid = false;
+          return;
+        }
+        updated[key] = n;
+      } else if (key === 'chat_ids') {
+        updated[key] = val.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      } else {
+        updated[key] = val;
+      }
+    });
+
+    if (!valid) return;
+    if (!config.transport) config.transport = {};
+    config.transport[name] = updated;
+    dirty = true;
+    closeModal();
+    renderTransports();
+  };
+}
+
+function closeModal() {
+  document.getElementById('modal-bg').classList.remove('active');
+}
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.getElementById('modal-bg').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('modal-bg')) closeModal();
+});
+
+// Save config
+document.getElementById('btn-save-transports').addEventListener('click', async () => {
+  if (!dirty) return;
+  const res = await fetch('/config', { method: 'PUT', headers: authHeaders(), body: JSON.stringify(config) });
+  const data = await res.json();
+  if (!res.ok) { banner(data.error || 'save failed', 'err'); return; }
+  dirty = false;
+  renderTransports();
+  banner('saved — restart hermytt to apply changes', 'warn');
+});
+
+// Sessions
 async function refreshSessions() {
   const res = await fetch('/sessions', { headers: authHeaders() });
   if (!res.ok) return;
   const data = await res.json();
-  const tbody = document.getElementById('sessions-table');
   document.getElementById('stat-sessions').textContent = data.sessions.length;
-
-  const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
-  tbody.innerHTML = data.sessions.map(s => `
+  document.getElementById('sessions-table').innerHTML = data.sessions.map(s => `
     <tr>
-      <td>${esc(s.id.slice(0, 8))}</td>
-      <td><span class="badge badge-green">active</span></td>
-      <td>
-        <a href="/#${encodeURIComponent(s.id)}" class="btn">open</a>
-      </td>
+      <td>${esc(s.id.slice(0,8))}</td>
+      <td><span class="dot dot-green"></span>active</td>
+      <td style="text-align:right"><a href="/#${encodeURIComponent(s.id)}" class="btn btn-sm">open</a></td>
     </tr>
   `).join('') || '<tr><td colspan="3" style="color:#6f6f8f">no sessions</td></tr>';
 }
@@ -216,19 +345,7 @@ async function refreshInfo() {
     const data = await res.json();
     document.getElementById('stat-shell').textContent = data.shell.split('/').pop();
     document.getElementById('stat-uptime').textContent = 'running';
-
-    const tbody = document.getElementById('transports-table');
-    const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
-    tbody.innerHTML = data.transports.map(t => `
-      <tr>
-        <td>${esc(t.name)}</td>
-        <td><span class="badge badge-green">active</span></td>
-        <td style="color:#6f6f8f">${esc(t.endpoint || '-')}</td>
-      </tr>
-    `).join('');
-  } catch(e) {
-    document.getElementById('stat-uptime').textContent = 'error';
-  }
+  } catch(e) { document.getElementById('stat-uptime').textContent = 'error'; }
 }
 
 document.getElementById('btn-new-session').addEventListener('click', async () => {
@@ -236,31 +353,18 @@ document.getElementById('btn-new-session').addEventListener('click', async () =>
   refreshSessions();
 });
 
+// Exec
 document.getElementById('btn-exec').addEventListener('click', runExec);
-document.getElementById('exec-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runExec();
-});
-
+document.getElementById('exec-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') runExec(); });
 async function runExec() {
   const input = document.getElementById('exec-input');
   const output = document.getElementById('exec-output');
   const cmd = input.value.trim();
   if (!cmd) return;
-
   output.style.display = 'block';
   output.textContent = 'running...';
-
-  const res = await fetch('/exec', {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify({ input: cmd }),
-  });
-
-  if (!res.ok) {
-    output.textContent = `error: ${res.status}`;
-    return;
-  }
-
+  const res = await fetch('/exec', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ input: cmd }) });
+  if (!res.ok) { output.textContent = `error: ${res.status}`; return; }
   const data = await res.json();
   let text = data.stdout || '';
   if (data.stderr) text += (text ? '\n' : '') + data.stderr;
@@ -269,7 +373,8 @@ async function runExec() {
   input.value = '';
 }
 
-// Initial load + auto-refresh
+// Boot
+loadConfig();
 refreshSessions();
 refreshInfo();
 setInterval(refreshSessions, 5000);

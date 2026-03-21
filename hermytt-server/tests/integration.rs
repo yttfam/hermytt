@@ -26,6 +26,7 @@ async fn start_server() -> String {
             name: "REST".into(),
             endpoint: format!("127.0.0.1:{}", port),
         }],
+        config_path: None,
     });
 
     let sessions_clone = sessions.clone();

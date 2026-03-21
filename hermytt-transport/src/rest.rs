@@ -24,6 +24,7 @@ pub struct RestTransport {
     pub auth_token: Option<String>,
     pub shell: String,
     pub transport_info: Vec<TransportInfo>,
+    pub config_path: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -38,6 +39,7 @@ struct AppState {
     auth_token: Option<String>,
     shell: String,
     transport_info: Vec<TransportInfo>,
+    config_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -68,6 +70,7 @@ impl Transport for RestTransport {
             auth_token: self.auth_token.clone(),
             shell: self.shell.clone(),
             transport_info: self.transport_info.clone(),
+            config_path: self.config_path.clone(),
         };
 
         // API routes behind auth.
@@ -80,6 +83,8 @@ impl Transport for RestTransport {
             .route("/stdin", post(write_stdin_default))
             .route("/stdout", get(stream_stdout_default))
             .route("/exec", post(exec_default))
+            .route("/config", get(get_config))
+            .route("/config", axum::routing::put(save_config))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -143,6 +148,70 @@ async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
         "sessions": sessions.len(),
         "transports": state.transport_info,
     }))
+}
+
+async fn get_config(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let Some(path) = &state.config_path else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let parsed: toml::Value =
+        toml::from_str(&content).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::to_value(&parsed).unwrap_or_default()))
+}
+
+async fn save_config(
+    State(state): State<AppState>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let Some(path) = &state.config_path else {
+        return Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "no config file"}))));
+    };
+
+    // Validate required fields per transport.
+    if let Some(transport) = body.get("transport") {
+        if let Some(mqtt) = transport.get("mqtt") {
+            if mqtt.get("broker").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "MQTT: broker is required"}))));
+            }
+        }
+        if let Some(rest) = transport.get("rest") {
+            if let Some(port) = rest.get("port") {
+                if port.as_u64().unwrap_or(0) == 0 || port.as_u64().unwrap_or(0) > 65535 {
+                    return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "REST: invalid port"}))));
+                }
+            }
+        }
+        if let Some(tcp) = transport.get("tcp") {
+            if let Some(port) = tcp.get("port") {
+                if port.as_u64().unwrap_or(0) == 0 || port.as_u64().unwrap_or(0) > 65535 {
+                    return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "TCP: invalid port"}))));
+                }
+            }
+        }
+        if let Some(tg) = transport.get("telegram") {
+            if tg.get("bot_token").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Telegram: bot_token is required"}))));
+            }
+        }
+    }
+
+    // Convert JSON -> TOML and write.
+    let toml_value: toml::Value = serde_json::from_value(body).map_err(|e| {
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("invalid config: {}", e)})))
+    })?;
+    let toml_string = toml::to_string_pretty(&toml_value).map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": format!("serialize failed: {}", e)})))
+    })?;
+
+    tokio::fs::write(path, &toml_string).await.map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": format!("write failed: {}", e)})))
+    })?;
+
+    info!("config saved to {}", path);
+    Ok(Json(serde_json::json!({"status": "saved", "restart_required": true})))
 }
 
 async fn create_session(
