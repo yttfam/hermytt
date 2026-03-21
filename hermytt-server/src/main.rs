@@ -166,9 +166,6 @@ async fn start_server(
 
 
     if let Some(mqtt_config) = &config.transport.mqtt {
-        if mqtt_config.username.is_none() {
-            warn!("MQTT transport has no broker auth — anyone on the broker can execute commands!");
-        }
         let transport = Arc::new(MqttTransport {
             broker_host: mqtt_config.broker.clone(),
             broker_port: mqtt_config.port,
@@ -198,9 +195,6 @@ async fn start_server(
     }
 
     if let Some(tg_config) = &config.transport.telegram {
-        if tg_config.chat_ids.is_empty() {
-            warn!("Telegram transport has no chat_ids whitelist — any Telegram user can execute commands!");
-        }
         let transport = Arc::new(TelegramTransport {
             bot_token: tg_config.bot_token.clone(),
             chat_ids: tg_config.chat_ids.clone(),
@@ -211,6 +205,12 @@ async fn start_server(
                 tracing::error!(transport = "telegram", error = %e, "transport failed");
             }
         }));
+    }
+
+    if tasks.is_empty() {
+        warn!("no transports enabled — hermytt has nothing to do");
+        warn!("add at least [transport.rest] to your config");
+        return Ok(());
     }
 
     futures_util::future::join_all(tasks).await;

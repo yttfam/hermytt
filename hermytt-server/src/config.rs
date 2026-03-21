@@ -40,8 +40,6 @@ pub struct TransportConfig {
     #[serde(default)]
     pub rest: Option<RestConfig>,
     #[serde(default)]
-    pub websocket: Option<WebSocketConfig>,
-    #[serde(default)]
     pub mqtt: Option<MqttConfig>,
     #[serde(default)]
     pub tcp: Option<TcpConfig>,
@@ -52,12 +50,6 @@ pub struct TransportConfig {
 #[derive(Debug, Deserialize)]
 pub struct RestConfig {
     #[serde(default = "default_rest_port")]
-    pub port: u16,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct WebSocketConfig {
-    #[serde(default = "default_ws_port")]
     pub port: u16,
 }
 
@@ -95,9 +87,6 @@ fn default_scrollback() -> usize {
 fn default_rest_port() -> u16 {
     7777
 }
-fn default_ws_port() -> u16 {
-    7778
-}
 fn default_mqtt_port() -> u16 {
     1883
 }
@@ -126,7 +115,6 @@ impl Config {
             auth: AuthConfig::default(),
             transport: TransportConfig {
                 rest: Some(RestConfig { port: 7777 }),
-                websocket: Some(WebSocketConfig { port: 7778 }),
                 mqtt: None,
                 tcp: None,
                 telegram: None,
@@ -184,9 +172,6 @@ mod tests {
             [transport.rest]
             port = 8080
 
-            [transport.websocket]
-            port = 8081
-
             [transport.mqtt]
             broker = "10.0.0.1"
             port = 1883
@@ -202,7 +187,6 @@ mod tests {
         assert_eq!(config.server.shell, "/bin/zsh");
         assert_eq!(config.server.scrollback, 500);
         assert_eq!(config.transport.rest.unwrap().port, 8080);
-        assert_eq!(config.transport.websocket.unwrap().port, 8081);
         let mqtt = config.transport.mqtt.unwrap();
         assert_eq!(mqtt.broker, "10.0.0.1");
         assert_eq!(mqtt.username.as_deref(), Some("user"));
@@ -213,7 +197,6 @@ mod tests {
     fn transports_optional() {
         let config = Config::from_str("[server]\nshell = \"/bin/sh\"").unwrap();
         assert!(config.transport.rest.is_none());
-        assert!(config.transport.websocket.is_none());
         assert!(config.transport.mqtt.is_none());
         assert!(config.transport.tcp.is_none());
     }
@@ -223,13 +206,11 @@ mod tests {
         let config = Config::from_str(
             r#"
             [transport.rest]
-            [transport.websocket]
             [transport.tcp]
             "#,
         )
         .unwrap();
         assert_eq!(config.transport.rest.unwrap().port, 7777);
-        assert_eq!(config.transport.websocket.unwrap().port, 7778);
         assert_eq!(config.transport.tcp.unwrap().port, 7779);
     }
 }
