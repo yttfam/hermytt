@@ -9,7 +9,6 @@ use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::extract::{Path, Query, State, WebSocketUpgrade};
 use axum::http::{Request, StatusCode};
 use axum::middleware::{self, Next};
-use axum::response::Html;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
@@ -23,12 +22,22 @@ pub struct RestTransport {
     pub port: u16,
     pub bind: String,
     pub auth_token: Option<String>,
+    pub shell: String,
+    pub transport_info: Vec<TransportInfo>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct TransportInfo {
+    pub name: String,
+    pub endpoint: String,
 }
 
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<SessionManager>,
     auth_token: Option<String>,
+    shell: String,
+    transport_info: Vec<TransportInfo>,
 }
 
 #[derive(Deserialize)]
@@ -57,13 +66,13 @@ impl Transport for RestTransport {
         let state = AppState {
             sessions,
             auth_token: self.auth_token.clone(),
+            shell: self.shell.clone(),
+            transport_info: self.transport_info.clone(),
         };
-
-        // Web UI is public (it needs the token to connect WS anyway).
-        let public = Router::new().route("/", get(web_ui));
 
         // API routes behind auth.
         let api = Router::new()
+            .route("/info", get(server_info))
             .route("/session", post(create_session))
             .route("/sessions", get(list_sessions))
             .route("/session/{id}/stdin", post(write_stdin))
@@ -79,7 +88,10 @@ impl Transport for RestTransport {
                 auth_middleware,
             ));
 
-        let app = public.merge(api).with_state(state);
+        // Web UI from hermytt-web (public, no auth).
+        let web = hermytt_web::routes();
+
+        let app = web.merge(api).with_state(state);
 
         let addr = format!("{}:{}", self.bind, self.port);
         info!(transport = "rest", addr = %addr, "listening");
@@ -122,8 +134,13 @@ async fn auth_middleware(
     }
 }
 
-async fn web_ui(State(state): State<AppState>) -> Html<String> {
-    Html(build_web_ui())
+async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let sessions = state.sessions.list_sessions().await;
+    Json(serde_json::json!({
+        "shell": state.shell,
+        "sessions": sessions.len(),
+        "transports": state.transport_info,
+    }))
 }
 
 async fn create_session(
@@ -336,491 +353,3 @@ fn make_sse_stream(
     )
 }
 
-fn build_web_ui() -> String {
-    r##"<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<title>hermytt</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    background: #0a0a0a;
-    font-family: monospace;
-    overflow: hidden;
-    touch-action: manipulation;
-  }
-  body {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-  #bar {
-    background: #1a1a2e;
-    color: #7f7f9f;
-    padding: 6px 14px;
-    font-size: 13px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid #2a2a3e;
-    flex-shrink: 0;
-  }
-  #bar .name { color: #c0c0e0; font-weight: bold; }
-  #bar .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #555;
-    display: inline-block;
-    margin-right: 6px;
-    transition: background 0.3s;
-  }
-  #bar .dot.on { background: #4ade80; }
-  #tabs {
-    background: #12121f;
-    display: flex;
-    align-items: center;
-    gap: 0;
-    border-bottom: 1px solid #2a2a3e;
-    flex-shrink: 0;
-    overflow-x: auto;
-  }
-  .tab {
-    padding: 6px 16px;
-    color: #6f6f8f;
-    cursor: pointer;
-    border-right: 1px solid #1a1a2e;
-    font-size: 13px;
-    white-space: nowrap;
-    user-select: none;
-    transition: all 0.15s;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .tab:hover { background: #1a1a2e; color: #9f9fbf; }
-  .tab.active { background: #0a0a0a; color: #e0e0e0; border-bottom: 2px solid #60a5fa; }
-  .tab .close {
-    opacity: 0;
-    font-size: 11px;
-    color: #6f6f8f;
-    transition: opacity 0.15s;
-  }
-  .tab:hover .close { opacity: 1; }
-  .tab .close:hover { color: #ff6b6b; }
-  #new-tab {
-    padding: 6px 12px;
-    color: #4a4a6e;
-    cursor: pointer;
-    font-size: 16px;
-    transition: color 0.15s;
-    flex-shrink: 0;
-  }
-  #new-tab:hover { color: #60a5fa; }
-  #terminals {
-    flex: 1;
-    position: relative;
-    min-height: 0;
-    overflow: hidden;
-  }
-  .term-container {
-    position: absolute;
-    inset: 0;
-    display: none;
-  }
-  .term-container.active {
-    display: block;
-  }
-  #mobile-input {
-    display: none;
-    background: #12121f;
-    border-top: 1px solid #2a2a3e;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
-    flex-shrink: 0;
-  }
-  #mobile-input form {
-    display: flex;
-    gap: 6px;
-  }
-  #mobile-input input {
-    flex: 1;
-    background: #0a0a0a;
-    border: 1px solid #2a2a3e;
-    color: #e0e0e0;
-    padding: 8px 10px;
-    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
-    font-size: 14px;
-    border-radius: 4px;
-    outline: none;
-  }
-  #mobile-input input:focus {
-    border-color: #60a5fa;
-  }
-  #mobile-input button {
-    background: #1a1a2e;
-    border: 1px solid #2a2a3e;
-    color: #9f9fbf;
-    padding: 8px 14px;
-    font-family: monospace;
-    font-size: 14px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  #mobile-input button:active {
-    background: #2a2a3e;
-  }
-  .mobile #mobile-input { display: block; }
-  .mobile .tab .close { opacity: 1; }
-  .mobile #bar { padding: 4px 10px; font-size: 12px; }
-  .mobile .tab { padding: 4px 10px; font-size: 12px; }
-</style>
-</head>
-<body>
-<div id="bar">
-  <span><span class="name">hermytt</span> · the hermit tty</span>
-  <span><span class="dot" id="status"></span><span id="status-text">ready</span></span>
-</div>
-<div id="tabs"><div id="new-tab" title="new session">+</div></div>
-<div id="terminals"></div>
-<div id="mobile-input">
-  <form id="mobile-form">
-    <input type="text" id="mobile-text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="type command...">
-    <button type="submit">&#x23CE;</button>
-    <button type="button" id="btn-ctrl-c" style="color:#ff6b6b">^C</button>
-    <button type="button" id="btn-tab">&#x21E5;</button>
-  </form>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
-<script>
-const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-const WS_PORT = location.port || (location.protocol === 'https:' ? 443 : 80);
-const TOKEN = new URLSearchParams(location.search).get('token') || '';
-const sessions = new Map();
-let activeId = null;
-
-const THEME = {
-  background: '#0a0a0a',
-  foreground: '#e0e0e0',
-  cursor: '#c0c0e0',
-  selectionBackground: '#3a3a5e',
-  black: '#1a1a2e',
-  red: '#ff6b6b',
-  green: '#4ade80',
-  yellow: '#fbbf24',
-  blue: '#60a5fa',
-  magenta: '#c084fc',
-  cyan: '#22d3ee',
-  white: '#e0e0e0',
-  brightBlack: '#4a4a6e',
-  brightRed: '#fca5a5',
-  brightGreen: '#86efac',
-  brightYellow: '#fde68a',
-  brightBlue: '#93c5fd',
-  brightMagenta: '#d8b4fe',
-  brightCyan: '#67e8f9',
-  brightWhite: '#ffffff',
-};
-
-function authHeaders() {
-  const h = {};
-  if (TOKEN) h['X-Hermytt-Key'] = TOKEN;
-  return h;
-}
-
-async function fetchSessions() {
-  const tokenParam = TOKEN ? `?token=${TOKEN}` : '';
-  const res = await fetch(`/sessions${tokenParam}`, { headers: authHeaders() });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.sessions.map(s => s.id);
-}
-
-async function createSession() {
-  const tokenParam = TOKEN ? `?token=${TOKEN}` : '';
-  const res = await fetch(`/session${tokenParam}`, { method: 'POST', headers: authHeaders() });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.id;
-}
-
-function addSession(id) {
-  if (sessions.has(id)) {
-    switchTo(id);
-    return;
-  }
-
-  const container = document.createElement('div');
-  container.className = 'term-container';
-  container.id = `term-${id}`;
-  document.getElementById('terminals').appendChild(container);
-
-  const term = new window.Terminal({
-    cursorBlink: true,
-    fontSize: isMobile ? 12 : 15,
-    fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
-    theme: THEME,
-    allowProposedApi: true,
-  });
-
-  const fitAddon = new window.FitAddon.FitAddon();
-  const webLinksAddon = new window.WebLinksAddon.WebLinksAddon();
-  term.loadAddon(fitAddon);
-  term.loadAddon(webLinksAddon);
-  term.open(container);
-
-  const session = { id, term, fitAddon, ws: null, container };
-  sessions.set(id, session);
-
-  connectSession(session);
-  addTab(id);
-  switchTo(id);
-}
-
-function connectSession(session) {
-  const wsHost = location.hostname || 'localhost';
-  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-  const tokenParam = TOKEN ? `?token=${TOKEN}` : '';
-  const ws = new WebSocket(`${scheme}://${wsHost}:${WS_PORT}/ws/${session.id}${tokenParam}`);
-
-  ws.onopen = () => {
-    if (activeId === session.id) updateStatus(true, session.id);
-  };
-
-  ws.onmessage = (e) => {
-    session.term.write(e.data);
-  };
-
-  ws.onclose = (e) => {
-    if (e.code === 4401) {
-      session.term.write('\r\n\x1b[31m[hermytt] unauthorized\x1b[0m\r\n');
-      if (activeId === session.id) updateStatus(false, 'unauthorized');
-      return;
-    }
-    if (sessions.has(session.id)) {
-      if (activeId === session.id) updateStatus(false, 'reconnecting...');
-      setTimeout(() => {
-        if (sessions.has(session.id)) connectSession(session);
-      }, 2000);
-    }
-  };
-
-  ws.onerror = () => ws.close();
-
-  session.term.onData((data) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
-  });
-
-  session.ws = ws;
-}
-
-function addTab(id) {
-  const tab = document.createElement('div');
-  tab.className = 'tab';
-  tab.dataset.id = id;
-  tab.innerHTML = `<span>${id.slice(0, 8)}</span><span class="close">\u00d7</span>`;
-
-  tab.addEventListener('click', (e) => {
-    if (e.target.classList.contains('close')) {
-      removeSession(id);
-    } else {
-      switchTo(id);
-    }
-  });
-
-  const newTabBtn = document.getElementById('new-tab');
-  newTabBtn.parentNode.insertBefore(tab, newTabBtn);
-}
-
-function switchTo(id) {
-  activeId = id;
-
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.term-container').forEach(c => c.classList.remove('active'));
-
-  const tab = document.querySelector(`.tab[data-id="${id}"]`);
-  const container = document.getElementById(`term-${id}`);
-  if (tab) tab.classList.add('active');
-  if (container) container.classList.add('active');
-
-  const session = sessions.get(id);
-  if (session) {
-    // Delay fit to let the container render with correct dimensions.
-    setTimeout(() => session.fitAddon.fit(), 50);
-    if (!isMobile) session.term.focus();
-    const connected = session.ws && session.ws.readyState === WebSocket.OPEN;
-    updateStatus(connected, connected ? id : 'connecting...');
-  }
-}
-
-function removeSession(id) {
-  const session = sessions.get(id);
-  if (!session) return;
-
-  if (session.ws) session.ws.close();
-  session.term.dispose();
-  session.container.remove();
-  sessions.delete(id);
-
-  const tab = document.querySelector(`.tab[data-id="${id}"]`);
-  if (tab) tab.remove();
-
-  if (activeId === id) {
-    const remaining = [...sessions.keys()];
-    if (remaining.length > 0) {
-      switchTo(remaining[remaining.length - 1]);
-    } else {
-      activeId = null;
-      updateStatus(false, 'no sessions');
-    }
-  }
-}
-
-function updateStatus(on, text) {
-  const dot = document.getElementById('status');
-  const statusText = document.getElementById('status-text');
-  dot.classList.toggle('on', on);
-  statusText.textContent = text;
-}
-
-document.getElementById('new-tab').addEventListener('click', async () => {
-  const id = await createSession();
-  if (id) addSession(id);
-});
-
-window.addEventListener('resize', () => {
-  if (activeId) {
-    const session = sessions.get(activeId);
-    if (session) session.fitAddon.fit();
-  }
-});
-
-// Keyboard shortcut: Ctrl+Shift+T = new tab, Ctrl+Shift+W = close tab
-// Ctrl+Shift+[ and ] = prev/next tab
-document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey && e.shiftKey) {
-    const ids = [...sessions.keys()];
-    const idx = ids.indexOf(activeId);
-    if (e.key === 'T') { e.preventDefault(); document.getElementById('new-tab').click(); }
-    if (e.key === 'W' && activeId) { e.preventDefault(); removeSession(activeId); }
-    if (e.key === '[' && idx > 0) { e.preventDefault(); switchTo(ids[idx - 1]); }
-    if (e.key === ']' && idx < ids.length - 1) { e.preventDefault(); switchTo(ids[idx + 1]); }
-  }
-});
-
-// Mobile setup.
-if (isMobile) document.body.classList.add('mobile');
-
-// iOS viewport fix: set body height from actual window.innerHeight.
-function fixHeight() {
-  document.body.style.height = window.innerHeight + 'px';
-  if (activeId) {
-    const session = sessions.get(activeId);
-    if (session) setTimeout(() => session.fitAddon.fit(), 50);
-  }
-}
-fixHeight();
-window.addEventListener('resize', fixHeight);
-
-const mobileForm = document.getElementById('mobile-form');
-const mobileText = document.getElementById('mobile-text');
-
-function mobileSend(data) {
-  if (!activeId) return false;
-  const session = sessions.get(activeId);
-  if (!session || !session.ws || session.ws.readyState !== WebSocket.OPEN) {
-    mobileText.placeholder = 'not connected...';
-    return false;
-  }
-  session.ws.send(data);
-  return true;
-}
-
-// Submit via form submit event.
-mobileForm.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const text = mobileText.value;
-  if (!text) return;
-  if (mobileSend(text + '\r')) {
-    mobileText.value = '';
-  }
-});
-
-// Also handle Enter key directly (iOS sometimes doesn't fire submit).
-mobileText.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    const text = mobileText.value;
-    if (!text) return;
-    if (mobileSend(text + '\r')) {
-      mobileText.value = '';
-    }
-  }
-});
-
-document.getElementById('btn-ctrl-c').addEventListener('click', () => {
-  mobileSend('\x03');
-});
-
-document.getElementById('btn-tab').addEventListener('click', () => {
-  const text = mobileText.value;
-  if (text) {
-    mobileSend(text + '\t');
-    mobileText.value = '';
-  } else {
-    mobileSend('\t');
-  }
-});
-
-// Handle virtual keyboard resize.
-if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => {
-    if (activeId) {
-      const session = sessions.get(activeId);
-      if (session) setTimeout(() => session.fitAddon.fit(), 100);
-    }
-  });
-}
-
-// Debug helper for mobile.
-function dbg(msg) {
-  if (isMobile) {
-    mobileText.placeholder = msg;
-  }
-  console.log('[hermytt]', msg);
-}
-
-// Load existing sessions on startup.
-(async () => {
-  try {
-    dbg('fetching sessions...');
-    const ids = await fetchSessions();
-    dbg(`got ${ids.length} sessions`);
-    if (ids.length === 0) {
-      dbg('creating session...');
-      const id = await createSession();
-      if (id) {
-        dbg(`created ${id.slice(0,8)}, connecting ws...`);
-        addSession(id);
-      } else {
-        dbg('create failed — check token');
-      }
-    } else {
-      dbg(`loading ${ids.length} sessions...`);
-      ids.forEach(id => addSession(id));
-    }
-  } catch (e) {
-    dbg('error: ' + e.message);
-  }
-})();
-</script>
-</body>
-</html>"##
-    .to_string()
-}

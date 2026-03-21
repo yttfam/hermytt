@@ -4,7 +4,7 @@ members = [
     "hermytt-core",
     "hermytt-transport",
     "hermytt-server",
-    "hermytt-cli",
+    "hermytt-cli", "hermytt-web",
 ]
 
 [workspace.package]
@@ -57,6 +57,7 @@ serde_json = "1"
 # Internal crates
 hermytt-core = { path = "hermytt-core" }
 hermytt-transport = { path = "hermytt-transport" }
+hermytt-web = { path = "hermytt-web" }
 
 [profile.release]
 opt-level = "z"

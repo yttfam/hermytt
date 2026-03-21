@@ -122,11 +122,40 @@ async fn start_server(
 
     let mut tasks = Vec::new();
 
+    // Build transport info for the admin dashboard.
+    let mut transport_info = Vec::new();
+    if let Some(r) = &config.transport.rest {
+        transport_info.push(hermytt_transport::rest::TransportInfo {
+            name: "REST + WebSocket".into(),
+            endpoint: format!("{}:{}", config.server.bind, r.port),
+        });
+    }
+    if let Some(m) = &config.transport.mqtt {
+        transport_info.push(hermytt_transport::rest::TransportInfo {
+            name: "MQTT".into(),
+            endpoint: format!("{}:{}", m.broker, m.port),
+        });
+    }
+    if let Some(t) = &config.transport.tcp {
+        transport_info.push(hermytt_transport::rest::TransportInfo {
+            name: "TCP".into(),
+            endpoint: format!("{}:{}", config.server.bind, t.port),
+        });
+    }
+    if config.transport.telegram.is_some() {
+        transport_info.push(hermytt_transport::rest::TransportInfo {
+            name: "Telegram".into(),
+            endpoint: "bot API".into(),
+        });
+    }
+
     if let Some(rest_config) = &config.transport.rest {
         let transport = Arc::new(RestTransport {
             port: rest_config.port,
             bind: config.server.bind.clone(),
             auth_token: auth_token.clone(),
+            shell: config.server.shell.clone(),
+            transport_info: transport_info.clone(),
         });
         let sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {

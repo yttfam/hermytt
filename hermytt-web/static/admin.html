@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hermytt admin</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0a;
+    color: #e0e0e0;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+  a { color: #60a5fa; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  #header {
+    background: #1a1a2e;
+    padding: 16px 24px;
+    border-bottom: 1px solid #2a2a3e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #header h1 {
+    font-family: monospace;
+    font-size: 18px;
+    color: #c0c0e0;
+    font-weight: bold;
+  }
+  #header h1 span { color: #4a4a6e; font-weight: normal; }
+  #header nav { display: flex; gap: 16px; }
+  .container { max-width: 900px; margin: 0 auto; padding: 24px; }
+  .card {
+    background: #12121f;
+    border: 1px solid #2a2a3e;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 12px 16px;
+    background: #1a1a2e;
+    border-bottom: 1px solid #2a2a3e;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card-header h2 { font-size: 14px; color: #9f9fbf; text-transform: uppercase; letter-spacing: 0.5px; }
+  .card-body { padding: 16px; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+  }
+  .badge-green { background: #064e3b; color: #4ade80; }
+  .badge-yellow { background: #78350f; color: #fbbf24; }
+  .badge-red { background: #7f1d1d; color: #fca5a5; }
+  .badge-blue { background: #1e3a5f; color: #60a5fa; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 8px 12px; color: #6f6f8f; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #2a2a3e; }
+  td { padding: 10px 12px; border-bottom: 1px solid #1a1a2e; font-family: monospace; font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  .btn {
+    background: #1a1a2e;
+    border: 1px solid #2a2a3e;
+    color: #9f9fbf;
+    padding: 6px 14px;
+    font-family: monospace;
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn:hover { background: #2a2a3e; color: #e0e0e0; }
+  .btn-danger:hover { background: #7f1d1d; color: #fca5a5; border-color: #7f1d1d; }
+  .btn-primary { background: #1e3a5f; border-color: #1e3a5f; color: #60a5fa; }
+  .btn-primary:hover { background: #2563eb; color: #fff; }
+  .exec-box { display: flex; gap: 8px; margin-top: 12px; }
+  .exec-box input {
+    flex: 1;
+    background: #0a0a0a;
+    border: 1px solid #2a2a3e;
+    color: #e0e0e0;
+    padding: 8px 12px;
+    font-family: monospace;
+    font-size: 13px;
+    border-radius: 4px;
+    outline: none;
+  }
+  .exec-box input:focus { border-color: #60a5fa; }
+  #exec-output {
+    margin-top: 12px;
+    background: #0a0a0a;
+    border: 1px solid #2a2a3e;
+    border-radius: 4px;
+    padding: 12px;
+    font-family: monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+    display: none;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .stat { text-align: center; }
+  .stat .value { font-size: 28px; font-weight: bold; color: #c0c0e0; font-family: monospace; }
+  .stat .label { color: #6f6f8f; font-size: 12px; margin-top: 4px; }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 16px; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>hermytt <span>admin</span></h1>
+  <nav>
+    <a href="/">terminal</a>
+    <a href="/admin">admin</a>
+  </nav>
+</div>
+<div class="container">
+  <div class="card">
+    <div class="card-header"><h2>Overview</h2></div>
+    <div class="card-body">
+      <div class="stats-grid">
+        <div class="stat">
+          <div class="value" id="stat-sessions">-</div>
+          <div class="label">sessions</div>
+        </div>
+        <div class="stat">
+          <div class="value" id="stat-uptime">-</div>
+          <div class="label">server</div>
+        </div>
+        <div class="stat">
+          <div class="value" id="stat-shell">-</div>
+          <div class="label">shell</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <h2>Sessions</h2>
+      <button class="btn btn-primary" id="btn-new-session">+ new session</button>
+    </div>
+    <div class="card-body">
+      <table>
+        <thead><tr><th>ID</th><th>Status</th><th></th></tr></thead>
+        <tbody id="sessions-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Quick Exec</h2></div>
+    <div class="card-body">
+      <div class="exec-box">
+        <input type="text" id="exec-input" placeholder="run a command..." autocomplete="off">
+        <button class="btn btn-primary" id="btn-exec">run</button>
+      </div>
+      <div id="exec-output"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><h2>Transports</h2></div>
+    <div class="card-body">
+      <table>
+        <thead><tr><th>Transport</th><th>Status</th><th>Endpoint</th></tr></thead>
+        <tbody id="transports-table"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+function authHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  if (TOKEN) h['X-Hermytt-Key'] = TOKEN;
+  return h;
+}
+function tokenParam() { return TOKEN ? `?token=${TOKEN}` : ''; }
+
+async function refreshSessions() {
+  const res = await fetch(`/sessions${tokenParam()}`, { headers: authHeaders() });
+  if (!res.ok) return;
+  const data = await res.json();
+  const tbody = document.getElementById('sessions-table');
+  document.getElementById('stat-sessions').textContent = data.sessions.length;
+
+  tbody.innerHTML = data.sessions.map(s => `
+    <tr>
+      <td>${s.id.slice(0, 8)}</td>
+      <td><span class="badge badge-green">active</span></td>
+      <td>
+        <a href="/?token=${TOKEN}#${s.id}" class="btn">open</a>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="3" style="color:#6f6f8f">no sessions</td></tr>';
+}
+
+async function refreshInfo() {
+  try {
+    const res = await fetch(`/info${tokenParam()}`, { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    document.getElementById('stat-shell').textContent = data.shell.split('/').pop();
+    document.getElementById('stat-uptime').textContent = 'running';
+
+    const tbody = document.getElementById('transports-table');
+    tbody.innerHTML = data.transports.map(t => `
+      <tr>
+        <td>${t.name}</td>
+        <td><span class="badge badge-green">active</span></td>
+        <td style="color:#6f6f8f">${t.endpoint || '-'}</td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    document.getElementById('stat-uptime').textContent = 'error';
+  }
+}
+
+document.getElementById('btn-new-session').addEventListener('click', async () => {
+  await fetch(`/session${tokenParam()}`, { method: 'POST', headers: authHeaders() });
+  refreshSessions();
+});
+
+document.getElementById('btn-exec').addEventListener('click', runExec);
+document.getElementById('exec-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runExec();
+});
+
+async function runExec() {
+  const input = document.getElementById('exec-input');
+  const output = document.getElementById('exec-output');
+  const cmd = input.value.trim();
+  if (!cmd) return;
+
+  output.style.display = 'block';
+  output.textContent = 'running...';
+
+  const res = await fetch(`/exec${tokenParam()}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ input: cmd }),
+  });
+
+  if (!res.ok) {
+    output.textContent = `error: ${res.status}`;
+    return;
+  }
+
+  const data = await res.json();
+  let text = data.stdout || '';
+  if (data.stderr) text += (text ? '\n' : '') + data.stderr;
+  if (data.exit_code !== 0) text += `\n(exit ${data.exit_code})`;
+  output.textContent = text || '(no output)';
+  input.value = '';
+}
+
+// Initial load + auto-refresh
+refreshSessions();
+refreshInfo();
+setInterval(refreshSessions, 5000);
+</script>
+</body>
+</html>
