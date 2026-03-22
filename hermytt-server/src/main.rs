@@ -121,6 +121,15 @@ async fn start_server(
 
     let mut tasks = Vec::new();
 
+    // Periodic dead session cleanup.
+    let cleanup_sessions = sessions.clone();
+    tasks.push(tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            cleanup_sessions.cleanup_dead().await;
+        }
+    }));
+
     // Build transport info for the admin dashboard.
     let mut transport_info = Vec::new();
     if let Some(r) = &config.transport.rest {
