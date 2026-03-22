@@ -193,6 +193,7 @@ async fn start_server(
             recording_dir: config.server.recording_dir.as_ref().map(std::path::PathBuf::from),
             files_dir: config.server.files_dir.as_ref().map(std::path::PathBuf::from),
             max_upload_size: config.server.max_upload_size,
+            extra_routes: Some(hermytt_web::routes()),
         });
         let sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {

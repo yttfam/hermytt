@@ -5,7 +5,6 @@ edition.workspace = true
 
 [dependencies]
 hermytt-core.workspace = true
-hermytt-web.workspace = true
 tokio.workspace = true
 tokio-stream.workspace = true
 axum.workspace = true

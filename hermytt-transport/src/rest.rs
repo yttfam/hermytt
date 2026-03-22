@@ -34,6 +34,8 @@ pub struct RestTransport {
     pub recording_dir: Option<PathBuf>,
     pub files_dir: Option<PathBuf>,
     pub max_upload_size: usize,
+    /// Optional extra routes merged into the app (e.g., web UI). Must be stateless.
+    pub extra_routes: Option<Router>,
 }
 
 #[derive(Clone, Serialize)]
@@ -124,17 +126,17 @@ impl Transport for RestTransport {
             .route("/ws", get(ws_handler_default))
             .route("/ws/{id}", get(ws_handler));
 
-        // Web UI from hermytt-web (public, no auth).
-        let web = hermytt_web::routes();
-
-        // TODO: lock down allow_origin to configured origins when crytter ships.
-        // For now, permissive for dev. In prod, set specific origins.
         let cors = CorsLayer::new()
             .allow_origin(Any)
             .allow_headers(Any)
             .allow_methods(Any);
 
-        let app = web.merge(api).merge(ws_routes).with_state(state).layer(cors);
+        let mut app = api.merge(ws_routes).with_state(state).layer(cors);
+
+        // Merge optional extra routes (e.g., web UI).
+        if let Some(extra) = &self.extra_routes {
+            app = extra.clone().merge(app);
+        }
 
         let addr = format!("{}:{}", self.bind, self.port);
         let scheme = if self.tls.is_some() { "https" } else { "http" };

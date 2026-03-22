@@ -31,6 +31,7 @@ async fn start_server() -> String {
         recording_dir: None,
         files_dir: None,
         max_upload_size: 10 * 1024 * 1024,
+        extra_routes: None,
     });
 
     let sessions_clone = sessions.clone();
@@ -53,27 +54,7 @@ fn client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
-// --- Web UI ---
-
-#[tokio::test]
-async fn web_terminal_page_loads() {
-    let base = start_server().await;
-    let res = client().get(&base).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body = res.text().await.unwrap();
-    assert!(body.contains("hermytt"));
-    assert!(body.contains("crytter"));
-}
-
-#[tokio::test]
-async fn web_admin_page_loads() {
-    let base = start_server().await;
-    let res = client().get(format!("{}/admin", base)).send().await.unwrap();
-    assert_eq!(res.status(), 200);
-    let body = res.text().await.unwrap();
-    assert!(body.contains("admin"));
-    assert!(body.contains("Sessions"));
-}
+// Web UI tests moved to Playwright e2e (tests-e2e/terminal.spec.js)
 
 // --- Auth ---
 
