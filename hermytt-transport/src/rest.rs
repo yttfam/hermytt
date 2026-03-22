@@ -116,6 +116,9 @@ impl Transport for RestTransport {
             .route("/files/upload", post(upload_file))
             .route("/files/{filename}", get(download_file))
             .route("/files/{filename}", axum::routing::delete(delete_file))
+            // Internal session API (for Shytti and external orchestrators).
+            .route("/internal/session", post(register_managed_session))
+            .route("/internal/session/{id}", axum::routing::delete(unregister_managed_session))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -124,7 +127,8 @@ impl Transport for RestTransport {
         // WebSocket: auth via first message, not query param.
         let ws_routes = Router::new()
             .route("/ws", get(ws_handler_default))
-            .route("/ws/{id}", get(ws_handler));
+            .route("/ws/{id}", get(ws_handler))
+            .route("/internal/session/{id}/pipe", get(internal_pipe_handler));
 
         let cors = CorsLayer::new()
             .allow_origin(Any)
@@ -867,5 +871,116 @@ pub async fn auto_record_session(
             error!(session = %handle.id, error = %e, "failed to auto-record session");
         }
     }
+}
+
+// --- Internal session API (for Shytti and external orchestrators) ---
+
+#[derive(Deserialize)]
+struct RegisterSessionBody {
+    id: Option<String>,
+}
+
+async fn register_managed_session(
+    State(state): State<AppState>,
+    body: Option<Json<RegisterSessionBody>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let id = body.and_then(|b| b.id.clone());
+    let handle = state
+        .sessions
+        .register_session(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(serde_json::json!({
+        "id": handle.id,
+        "pipe": format!("/internal/session/{}/pipe", handle.id),
+    })))
+}
+
+async fn unregister_managed_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    state
+        .sessions
+        .unregister_session(&id)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok(Json(serde_json::json!({"status": "unregistered", "id": id})))
+}
+
+/// Internal WS pipe: bidirectional session bridge for Shytti.
+/// Shytti sends PTY stdout into this socket, receives stdin from it.
+/// Resize control messages are forwarded to connected transports.
+async fn internal_pipe_handler(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        let Some(socket) = ws_auth(socket, &state.auth_token).await else { return };
+        let Some(handle) = state.sessions.get_session(&id).await else { return };
+        handle_internal_pipe(socket, handle, state.sessions.clone()).await;
+    })
+}
+
+/// Bidirectional pipe for Shytti:
+/// - Shytti sends PTY output → we broadcast to all transports
+/// - Transport stdin → we forward to Shytti
+async fn handle_internal_pipe(
+    mut socket: WebSocket,
+    handle: hermytt_core::SessionHandle,
+    sessions: Arc<SessionManager>,
+) {
+    let output_tx = handle.output_tx.clone();
+    let session_id = handle.id.clone();
+
+    // Take the stdin receiver — only works for managed sessions.
+    let stdin_rx = sessions.take_stdin_rx(&session_id).await;
+
+    if let Some(mut stdin_rx) = stdin_rx {
+        // Full bidirectional pipe.
+        loop {
+            tokio::select! {
+                // Transport stdin → send to Shytti.
+                data = stdin_rx.recv() => {
+                    match data {
+                        Some(bytes) => {
+                            if socket.send(Message::Binary(bytes.into())).await.is_err() { break; }
+                        }
+                        None => break,
+                    }
+                }
+                // Shytti output → broadcast to transports.
+                msg = socket.recv() => {
+                    match msg {
+                        Some(Ok(Message::Text(text))) => {
+                            let _ = output_tx.send(text.as_bytes().to_vec());
+                        }
+                        Some(Ok(Message::Binary(data))) => {
+                            let _ = output_tx.send(data.to_vec());
+                        }
+                        Some(Ok(Message::Close(_))) | None => break,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    } else {
+        // No stdin_rx — output-only pipe (PTY session or already taken).
+        loop {
+            match socket.recv().await {
+                Some(Ok(Message::Text(text))) => {
+                    let _ = output_tx.send(text.as_bytes().to_vec());
+                }
+                Some(Ok(Message::Binary(data))) => {
+                    let _ = output_tx.send(data.to_vec());
+                }
+                Some(Ok(Message::Close(_))) | None => break,
+                _ => {}
+            }
+        }
+    }
+
+    info!(session = %session_id, "internal pipe disconnected");
 }
 

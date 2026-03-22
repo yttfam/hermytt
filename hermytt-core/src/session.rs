@@ -293,8 +293,68 @@ impl SessionManager {
         Ok(handle)
     }
 
+    /// Register a managed session (no PTY — Shytti or external process owns it).
+    /// Returns a SessionHandle with stdin/output channels for the external process to use.
+    pub async fn register_session(&self, id: Option<String>) -> Result<SessionHandle> {
+        let mut sessions = self.sessions.write().await;
+        anyhow::ensure!(
+            sessions.len() < self.max_sessions,
+            "max sessions ({}) reached",
+            self.max_sessions
+        );
+
+        let session_id = id.unwrap_or_else(|| {
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..16].to_string()
+        });
+
+        let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>(256);
+        let (output_tx, _) = broadcast::channel::<Vec<u8>>(256);
+        let scrollback = Arc::new(std::sync::Mutex::new(ScrollbackBuffer::new(
+            self.scrollback_capacity,
+        )));
+
+        let handle = SessionHandle {
+            id: session_id.clone(),
+            stdin_tx,
+            output_tx,
+            scrollback,
+        };
+
+        // Managed session — no PTY, no child, no master.
+        // stdin_rx is stored so the internal pipe can take it later.
+        let session = Arc::new(Session {
+            handle: handle.clone(),
+            stdin_rx: tokio::sync::Mutex::new(Some(stdin_rx)),
+            child: tokio::sync::Mutex::new(None),
+            master: std::sync::Mutex::new(None),
+            _slave: std::sync::Mutex::new(None),
+            shell: String::new(),
+        });
+
+        sessions.insert(session_id.clone(), session);
+        info!(session = %session_id, "managed session registered");
+        Ok(handle)
+    }
+
+    /// Unregister a session (managed or PTY).
+    pub async fn unregister_session(&self, id: &str) -> Result<()> {
+        let mut sessions = self.sessions.write().await;
+        let removed = sessions.remove(id);
+        anyhow::ensure!(removed.is_some(), "session not found");
+        info!(session = %id, "session unregistered");
+        Ok(())
+    }
+
     pub async fn get_session(&self, id: &str) -> Option<SessionHandle> {
         self.sessions.read().await.get(id).map(|s| s.handle.clone())
+    }
+
+    /// Take the stdin receiver for a managed session (used by internal pipe).
+    /// Returns None if already taken or if this is a PTY session.
+    pub async fn take_stdin_rx(&self, id: &str) -> Option<mpsc::Receiver<Vec<u8>>> {
+        let sessions = self.sessions.read().await;
+        let session = sessions.get(id)?;
+        session.stdin_rx.lock().await.take()
     }
 
     pub async fn resize_session(&self, id: &str, cols: u16, rows: u16) -> Result<()> {
