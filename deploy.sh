@@ -7,7 +7,6 @@ SSH_KEY="$HOME/.ssh/cali_net_rsa"
 REMOTE_DIR="/opt/hermytt"
 
 echo "Building for $TARGET..."
-PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" \
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc \
 cargo build --release --target "$TARGET"
 
