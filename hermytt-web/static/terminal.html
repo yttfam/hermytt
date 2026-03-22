@@ -247,6 +247,12 @@ function connectSession(session) {
       }
       return;
     }
+    // Session exit signal from server.
+    if (e.data === '{"exit":true}') {
+      session.term.write('\r\n\x1b[2m... finally, alone again.\x1b[0m\r\n');
+      setTimeout(() => removeSession(session.id), 2000);
+      return;
+    }
     // write() returns device query responses (DA1, CPR, etc.)
     const response = session.term.write(e.data);
     if (response) ws.send(response);
