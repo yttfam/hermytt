@@ -83,6 +83,7 @@
   #terminals { flex: 1; position: relative; min-height: 0; overflow: hidden; }
   .term-container { position: absolute; inset: 0; display: none; }
   .term-container.active { display: block; }
+  .term-container canvas { width: 100%; height: 100%; }
   #mobile-input {
     display: none;
     background: #12121f;
@@ -141,7 +142,13 @@
 <script type="module">
 import init, { Terminal } from '/vendor/crytter_wasm.js';
 
-await init('/vendor/crytter_wasm_bg.wasm');
+try {
+  await init('/vendor/crytter_wasm_bg.wasm');
+  console.log('[hermytt] WASM initialized');
+} catch (e) {
+  console.error('[hermytt] WASM init failed:', e);
+  document.getElementById('status-text').textContent = 'WASM init failed';
+}
 
 const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
@@ -218,11 +225,20 @@ function connectSession(session) {
   let authed = false;
 
   ws.onopen = () => {
-    if (TOKEN) ws.send(TOKEN);
+    console.log('[hermytt] WS open, TOKEN:', TOKEN ? 'set' : 'empty');
+    if (TOKEN) {
+      ws.send(TOKEN);
+    } else {
+      // No auth configured — immediately ready.
+      authed = true;
+      if (activeId === session.id) updateStatus(true, session.id.slice(0,8));
+      fitAndResize(session);
+    }
   };
 
   ws.onmessage = (e) => {
     if (!authed) {
+      console.log('[hermytt] WS msg (pre-auth):', e.data.slice(0, 50));
       if (e.data === 'auth:ok') {
         authed = true;
         if (activeId === session.id) updateStatus(true, session.id.slice(0,8));
@@ -250,8 +266,8 @@ function connectSession(session) {
   ws.onerror = () => ws.close();
 
   // Keyboard input — attach to container for focus
-  container.tabIndex = 0;
-  container.addEventListener('keydown', (e) => {
+  session.container.tabIndex = 0;
+  session.container.addEventListener('keydown', (e) => {
     if (ws.readyState !== WebSocket.OPEN || !authed) return;
     const data = session.term.handleKeyEvent(e);
     if (data) {
@@ -261,7 +277,7 @@ function connectSession(session) {
   });
 
   // Mouse wheel scroll
-  container.addEventListener('wheel', (e) => {
+  session.container.addEventListener('wheel', (e) => {
     const lines = Math.round(e.deltaY / 20);
     if (lines > 0) session.term.scrollDown(Math.abs(lines));
     else if (lines < 0) session.term.scrollUp(Math.abs(lines));
@@ -297,7 +313,11 @@ function switchTo(id) {
   if (container) container.classList.add('active');
   const session = sessions.get(id);
   if (session) {
-    setTimeout(() => fitAndResize(session), 50);
+    setTimeout(() => {
+      fitAndResize(session);
+      // Second fit after render settles
+      setTimeout(() => fitAndResize(session), 200);
+    }, 50);
     if (!isMobile) session.container.focus();
     const connected = session.ws && session.ws.readyState === WebSocket.OPEN;
     updateStatus(connected, connected ? id.slice(0,8) : 'connecting...');
@@ -391,7 +411,9 @@ function renderLoop() {
 requestAnimationFrame(renderLoop);
 
 // Boot
+console.log('[hermytt] crytter loaded, fetching sessions...');
 const ids = await fetchSessions();
+console.log('[hermytt] sessions:', ids);
 if (ids.length === 0) {
   const id = await createSession();
   if (id) addSession(id);
