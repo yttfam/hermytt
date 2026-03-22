@@ -9,7 +9,6 @@ use hermytt_transport::Transport;
 use hermytt_transport::mqtt::MqttTransport;
 use hermytt_transport::rest::RestTransport;
 use hermytt_transport::tcp::TcpTransport;
-use hermytt_transport::telegram::TelegramTransport;
 use hermytt_transport::tls::TlsConfig;
 use tracing::{info, warn};
 
@@ -182,13 +181,6 @@ async fn start_server(
             endpoint: format!("{}:{}", config.server.bind, t.port),
         });
     }
-    if config.transport.telegram.is_some() {
-        transport_info.push(hermytt_transport::rest::TransportInfo {
-            name: "Telegram".into(),
-            endpoint: "bot API".into(),
-        });
-    }
-
     if let Some(rest_config) = &config.transport.rest {
         let transport = Arc::new(RestTransport {
             port: rest_config.port,
@@ -235,19 +227,6 @@ async fn start_server(
         tasks.push(tokio::spawn(async move {
             if let Err(e) = transport.serve(sessions).await {
                 tracing::error!(transport = "tcp", error = %e, "transport failed");
-            }
-        }));
-    }
-
-    if let Some(tg_config) = &config.transport.telegram {
-        let transport = Arc::new(TelegramTransport {
-            bot_token: tg_config.bot_token.clone(),
-            chat_ids: tg_config.chat_ids.clone(),
-        });
-        let sessions = sessions.clone();
-        tasks.push(tokio::spawn(async move {
-            if let Err(e) = transport.serve(sessions).await {
-                tracing::error!(transport = "telegram", error = %e, "transport failed");
             }
         }));
     }

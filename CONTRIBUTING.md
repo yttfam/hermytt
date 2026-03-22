@@ -23,7 +23,7 @@ hermytt-server start -c hermytt.toml
 
 ```
 hermytt-core/         PTY sessions, output buffering, direct exec, platform
-hermytt-transport/    Transport trait + REST/WS, MQTT, TCP, Telegram
+hermytt-transport/    Transport trait + REST/WS, MQTT, TCP
 hermytt-web/          Web UI (terminal + admin), vendored crytter WASM
 hermytt-server/       Config, CLI, transport wiring
 hermytt-cli/          Client CLI (planned)
@@ -48,7 +48,7 @@ Integration tests spin up real servers on random ports and an embedded MQTT brok
 
 Two execution models:
 - **Stream** (WebSocket, TCP): pipe raw PTY I/O, full terminal
-- **Request** (REST /exec, MQTT, Telegram): `hermytt_core::exec()` for clean command → output
+- **Request** (REST /exec, MQTT): `hermytt_core::exec()` for clean command → output
 
 ## Style
 

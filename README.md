@@ -6,8 +6,7 @@ Transport-agnostic terminal multiplexer. One PTY, any client that speaks text.
                     ┌─── REST API (/stdin, /stdout SSE, /exec)
                     ├─── WebSocket (full terminal, crytter WASM UI)
 PTY (bash/zsh) ────┼─── MQTT (command → response)
-                    ├─── Raw TCP (netcat-compatible)
-                    └─── Telegram bot (command → response)
+                    └─── Raw TCP (netcat-compatible)
 ```
 
 The hermit lives alone. But he talks to everyone.
@@ -47,7 +46,7 @@ Open `http://localhost:7777/admin?token=YOUR_TOKEN` — manage sessions and tran
 
 **Stream** (WebSocket, TCP) — full interactive terminal. Colors, tab completion, TUIs, vim, htop. Use the web UI or netcat.
 
-**Exec** (REST `/exec`, MQTT, Telegram) — run a command, get stdout/stderr/exit code. Clean, fast, no PTY overhead. Use for automation and bots.
+**Exec** (REST `/exec`, MQTT) — run a command, get stdout/stderr/exit code. Clean, fast, no PTY overhead. Use for automation and bots.
 
 ## Transports
 
@@ -56,7 +55,6 @@ Open `http://localhost:7777/admin?token=YOUR_TOKEN` — manage sessions and tran
 | REST + WebSocket | both | `X-Hermytt-Key` header |
 | MQTT | exec | broker auth |
 | TCP | stream | first-line token |
-| Telegram | exec | chat_id whitelist |
 
 ### REST
 
@@ -107,9 +105,7 @@ nc host 7779
 # type token, press enter, full terminal
 ```
 
-### Telegram
-
-Send any text to the bot — runs as shell command, replies with output.
+> Chat bots (Telegram, Signal, Discord) are available as a separate project: [hermytt-bots](https://github.com/calibrae/hermytt-bots)
 
 ## Web UI
 
@@ -162,7 +158,7 @@ hermytt-server example-config
 
 ```
 hermytt-core/         PTY sessions, output buffering, direct exec, platform
-hermytt-transport/    Transport trait + REST/WS, MQTT, TCP, Telegram
+hermytt-transport/    Transport trait + REST/WS, MQTT, TCP
 hermytt-web/          Web UI (terminal + admin), crytter WASM
 hermytt-server/       Config, CLI, wiring
 hermytt-cli/          Client CLI (planned)

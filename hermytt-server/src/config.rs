@@ -56,8 +56,6 @@ pub struct TransportConfig {
     pub mqtt: Option<MqttConfig>,
     #[serde(default)]
     pub tcp: Option<TcpConfig>,
-    #[serde(default)]
-    pub telegram: Option<TelegramConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,7 +128,6 @@ impl Config {
                 rest: Some(RestConfig { port: 7777 }),
                 mqtt: None,
                 tcp: None,
-                telegram: None,
             },
         }
     }

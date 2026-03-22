@@ -230,11 +230,6 @@ async fn save_config(
                 }
             }
         }
-        if let Some(tg) = transport.get("telegram") {
-            if tg.get("bot_token").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-                return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Telegram: bot_token is required"}))));
-            }
-        }
     }
 
     // Convert JSON -> TOML and write.
