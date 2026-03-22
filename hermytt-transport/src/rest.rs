@@ -14,7 +14,7 @@ use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
-use hermytt_core::{BufferedOutput, RecordingHandle, SessionManager};
+use hermytt_core::{BufferedOutput, RecordingHandle, ServiceRegistry, SessionManager};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
@@ -58,6 +58,7 @@ struct AppState {
     recordings: RecordingMap,
     files_dir: Option<PathBuf>,
     max_upload_size: usize,
+    registry: Arc<ServiceRegistry>,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +94,7 @@ impl Transport for RestTransport {
             recordings: Arc::new(Mutex::new(HashMap::new())),
             files_dir: self.files_dir.clone(),
             max_upload_size: self.max_upload_size,
+            registry: Arc::new(ServiceRegistry::new()),
         };
 
         // API routes behind auth.
@@ -116,6 +118,10 @@ impl Transport for RestTransport {
             .route("/files/upload", post(upload_file))
             .route("/files/{filename}", get(download_file))
             .route("/files/{filename}", axum::routing::delete(delete_file))
+            // Service registry.
+            .route("/registry", get(registry_list))
+            .route("/registry/announce", post(registry_announce))
+            .route("/registry/{name}", axum::routing::delete(registry_unregister))
             // Internal session API (for Shytti and external orchestrators).
             .route("/internal/session", post(register_managed_session))
             .route("/internal/session/{id}", axum::routing::delete(unregister_managed_session))
@@ -198,12 +204,60 @@ async fn auth_middleware(
 
 async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
     let sessions = state.sessions.list_sessions().await;
+    let services = state.registry.list().await;
     Json(serde_json::json!({
         "shell": state.shell,
         "sessions": sessions.len(),
         "transports": state.transport_info,
+        "services": services,
     }))
 }
+
+// --- Service registry endpoints ---
+
+#[derive(Deserialize)]
+struct AnnounceBody {
+    name: String,
+    role: hermytt_core::registry::ServiceRole,
+    endpoint: String,
+    #[serde(default)]
+    meta: serde_json::Value,
+}
+
+async fn registry_announce(
+    State(state): State<AppState>,
+    Json(body): Json<AnnounceBody>,
+) -> Json<serde_json::Value> {
+    let info = hermytt_core::registry::ServiceInfo {
+        name: body.name.clone(),
+        role: body.role,
+        endpoint: body.endpoint,
+        status: hermytt_core::registry::ServiceStatus::Connected,
+        last_seen_instant: None,
+        last_seen: 0,
+        meta: body.meta,
+    };
+    state.registry.register(info).await;
+    Json(serde_json::json!({"ok": true, "name": body.name}))
+}
+
+async fn registry_list(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let services = state.registry.list().await;
+    Json(serde_json::json!({"services": services}))
+}
+
+async fn registry_unregister(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if state.registry.unregister(&name).await {
+        Ok(Json(serde_json::json!({"ok": true})))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+// --- Config endpoints ---
 
 async fn get_config(State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
     let Some(path) = &state.config_path else {
