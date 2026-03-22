@@ -6,7 +6,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>hermytt</title>
-<link rel="stylesheet" href="/vendor/xterm.min.css">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -139,17 +138,16 @@
     <button type="button" id="btn-tab">&#x21E5;</button>
   </form>
 </div>
-<script src="/vendor/xterm.min.js"></script>
-<script src="/vendor/addon-fit.min.js"></script>
-<script src="/vendor/addon-web-links.min.js"></script>
-<script>
+<script type="module">
+import init, { Terminal } from '/vendor/crytter_wasm.js';
+
+await init('/vendor/crytter_wasm_bg.wasm');
+
 const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-// Token: read from URL on first visit, store in sessionStorage, strip from URL.
 const urlToken = new URLSearchParams(location.search).get('token');
 if (urlToken) {
   sessionStorage.setItem('hermytt-token', urlToken);
-  // Remove token from URL (no page reload).
   const clean = new URL(location);
   clean.searchParams.delete('token');
   history.replaceState(null, '', clean);
@@ -159,22 +157,11 @@ const TOKEN = sessionStorage.getItem('hermytt-token') || '';
 const sessions = new Map();
 let activeId = null;
 
-const THEME = {
-  background: '#0a0a0a', foreground: '#e0e0e0', cursor: '#c0c0e0',
-  selectionBackground: '#3a3a5e',
-  black: '#1a1a2e', red: '#ff6b6b', green: '#4ade80', yellow: '#fbbf24',
-  blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e0e0e0',
-  brightBlack: '#4a4a6e', brightRed: '#fca5a5', brightGreen: '#86efac',
-  brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe',
-  brightCyan: '#67e8f9', brightWhite: '#ffffff',
-};
-
 function fitAndResize(session) {
   if (!session) return;
-  session.fitAddon.fit();
+  session.term.fit();
   if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-    const dims = session.fitAddon.proposeDimensions();
-    if (dims) session.ws.send(JSON.stringify({ resize: [dims.cols, dims.rows] }));
+    session.ws.send(JSON.stringify({ resize: [session.term.cols, session.term.rows] }));
   }
 }
 
@@ -210,19 +197,15 @@ function addSession(id) {
   container.id = `term-${id}`;
   document.getElementById('terminals').appendChild(container);
 
-  const term = new window.Terminal({
-    cursorBlink: true,
+  const term = new Terminal({
+    cols: 80,
+    rows: 24,
     fontSize: isMobile ? 12 : 15,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
-    theme: THEME, allowProposedApi: true,
   });
-
-  const fitAddon = new window.FitAddon.FitAddon();
-  term.loadAddon(fitAddon);
-  term.loadAddon(new window.WebLinksAddon.WebLinksAddon());
   term.open(container);
 
-  const session = { id, term, fitAddon, ws: null, container };
+  const session = { id, term, ws: null, container };
   sessions.set(id, session);
   connectSession(session);
   addTab(id);
@@ -235,7 +218,6 @@ function connectSession(session) {
   let authed = false;
 
   ws.onopen = () => {
-    // First-message auth: send token before any PTY data.
     if (TOKEN) ws.send(TOKEN);
   };
 
@@ -244,17 +226,18 @@ function connectSession(session) {
       if (e.data === 'auth:ok') {
         authed = true;
         if (activeId === session.id) updateStatus(true, session.id.slice(0,8));
+        fitAndResize(session);
         return;
       }
-      // If server didn't ack, it'll close with 4401.
       return;
     }
-    session.term.write(e.data);
+    // write() returns device query responses (DA1, CPR, etc.)
+    const response = session.term.write(e.data);
+    if (response) ws.send(response);
   };
 
   ws.onclose = (e) => {
     if (e.code === 4401) {
-      session.term.write('\r\n\x1b[31m[hermytt] unauthorized — check your token\x1b[0m\r\n');
       updateStatus(false, 'unauthorized');
       return;
     }
@@ -265,7 +248,31 @@ function connectSession(session) {
   };
 
   ws.onerror = () => ws.close();
-  session.term.onData((data) => { if (ws.readyState === WebSocket.OPEN && authed) ws.send(data); });
+
+  // Keyboard input — attach to container for focus
+  container.tabIndex = 0;
+  container.addEventListener('keydown', (e) => {
+    if (ws.readyState !== WebSocket.OPEN || !authed) return;
+    const data = session.term.handleKeyEvent(e);
+    if (data) {
+      ws.send(data);
+      e.preventDefault();
+    }
+  });
+
+  // Mouse wheel scroll
+  container.addEventListener('wheel', (e) => {
+    const lines = Math.round(e.deltaY / 20);
+    if (lines > 0) session.term.scrollDown(Math.abs(lines));
+    else if (lines < 0) session.term.scrollUp(Math.abs(lines));
+    e.preventDefault();
+  }, { passive: false });
+
+  // Title changes
+  session.term.onTitleChange((title) => {
+    if (activeId === session.id) document.title = title || 'hermytt';
+  });
+
   session.ws = ws;
 }
 
@@ -291,7 +298,7 @@ function switchTo(id) {
   const session = sessions.get(id);
   if (session) {
     setTimeout(() => fitAndResize(session), 50);
-    if (!isMobile) session.term.focus();
+    if (!isMobile) session.container.focus();
     const connected = session.ws && session.ws.readyState === WebSocket.OPEN;
     updateStatus(connected, connected ? id.slice(0,8) : 'connecting...');
   }
@@ -301,7 +308,6 @@ function removeSession(id) {
   const session = sessions.get(id);
   if (!session) return;
   if (session.ws) session.ws.close();
-  session.term.dispose();
   session.container.remove();
   sessions.delete(id);
   document.querySelector(`.tab[data-id="${id}"]`)?.remove();
@@ -377,16 +383,21 @@ if (window.visualViewport) {
   });
 }
 
+// Render loop — crytter batches writes, render() draws to canvas
+function renderLoop() {
+  sessions.forEach(s => s.term.render());
+  requestAnimationFrame(renderLoop);
+}
+requestAnimationFrame(renderLoop);
+
 // Boot
-(async () => {
-  const ids = await fetchSessions();
-  if (ids.length === 0) {
-    const id = await createSession();
-    if (id) addSession(id);
-  } else {
-    ids.forEach(id => addSession(id));
-  }
-})();
+const ids = await fetchSessions();
+if (ids.length === 0) {
+  const id = await createSession();
+  if (id) addSession(id);
+} else {
+  ids.forEach(id => addSession(id));
+}
 </script>
 </body>
 </html>
