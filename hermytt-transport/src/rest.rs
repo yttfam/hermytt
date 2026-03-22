@@ -390,8 +390,8 @@ async fn handle_ws_socket(
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        // Intercept resize messages: {"resize":[cols,rows]}
-                        if text.starts_with("{\"resize\"") {
+                        // Intercept JSON control messages before forwarding to PTY.
+                        if text.starts_with('{') {
                             if let Ok(val) = serde_json::from_str::<serde_json::Value>(text.as_str()) {
                                 if let Some(dims) = val.get("resize").and_then(|v| v.as_array()) {
                                     if let (Some(cols), Some(rows)) = (
@@ -401,8 +401,10 @@ async fn handle_ws_socket(
                                         let _ = sessions.resize_session(&session_id, cols as u16, rows as u16).await;
                                     }
                                 }
+                                // Any valid JSON is a control message, don't forward to PTY.
+                                continue;
                             }
-                            continue;
+                            // Invalid JSON starting with { — fall through to PTY stdin.
                         }
                         if stdin_tx.send(text.as_bytes().to_vec()).await.is_err() { break; }
                     }
