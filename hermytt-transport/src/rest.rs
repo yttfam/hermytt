@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
-use axum::extract::{Path, Query, State, WebSocketUpgrade};
+use axum::extract::{Multipart, Path, Query, State, WebSocketUpgrade};
 use axum::http::{Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
@@ -32,6 +32,8 @@ pub struct RestTransport {
     pub config_path: Option<String>,
     pub tls: Option<TlsConfig>,
     pub recording_dir: Option<PathBuf>,
+    pub files_dir: Option<PathBuf>,
+    pub max_upload_size: usize,
 }
 
 #[derive(Clone, Serialize)]
@@ -52,6 +54,8 @@ struct AppState {
     config_path: Option<String>,
     recording_dir: Option<PathBuf>,
     recordings: RecordingMap,
+    files_dir: Option<PathBuf>,
+    max_upload_size: usize,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +89,8 @@ impl Transport for RestTransport {
             config_path: self.config_path.clone(),
             recording_dir: self.recording_dir.clone(),
             recordings: Arc::new(Mutex::new(HashMap::new())),
+            files_dir: self.files_dir.clone(),
+            max_upload_size: self.max_upload_size,
         };
 
         // API routes behind auth.
@@ -104,6 +110,10 @@ impl Transport for RestTransport {
             .route("/config", get(get_config))
             .route("/config", axum::routing::put(save_config))
             .route("/restart", post(restart_server))
+            .route("/files", get(list_files))
+            .route("/files/upload", post(upload_file))
+            .route("/files/{filename}", get(download_file))
+            .route("/files/{filename}", axum::routing::delete(delete_file))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -345,7 +355,7 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| async move {
         let Some(socket) = ws_auth(socket, &state.auth_token).await else { return };
         let Some(handle) = state.sessions.get_session(&id).await else { return };
-        handle_ws_socket(socket, handle, state.sessions.clone()).await;
+        handle_ws_socket(socket, handle, state.sessions.clone(), state.files_dir.clone()).await;
     })
 }
 
@@ -356,7 +366,7 @@ async fn ws_handler_default(
     ws.on_upgrade(move |socket| async move {
         let Some(socket) = ws_auth(socket, &state.auth_token).await else { return };
         let Ok(handle) = state.sessions.default_session().await else { return };
-        handle_ws_socket(socket, handle, state.sessions.clone()).await;
+        handle_ws_socket(socket, handle, state.sessions.clone(), state.files_dir.clone()).await;
     })
 }
 
@@ -396,6 +406,7 @@ async fn handle_ws_socket(
     mut socket: WebSocket,
     handle: hermytt_core::SessionHandle,
     sessions: Arc<SessionManager>,
+    files_dir: Option<PathBuf>,
 ) {
     let stdin_tx = handle.stdin_tx.clone();
     let session_id = handle.id.clone();
@@ -429,6 +440,30 @@ async fn handle_ws_socket(
                                         dims.get(1).and_then(|v| v.as_u64()),
                                     ) {
                                         let _ = sessions.resize_session(&session_id, cols as u16, rows as u16).await;
+                                    }
+                                }
+                                // Handle pasted images.
+                                if let Some(paste) = val.get("paste_image") {
+                                    if let (Some(dir), Some(data_str)) = (&files_dir, paste.get("data").and_then(|v| v.as_str())) {
+                                        if let Ok(data) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data_str) {
+                                            let ts = std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_secs();
+                                            let ext = paste.get("name")
+                                                .and_then(|n| n.as_str())
+                                                .and_then(|n| n.rsplit('.').next())
+                                                .unwrap_or("png");
+                                            let filename = format!("paste-{}.{}", ts, ext);
+                                            let path = dir.join(&filename);
+                                            let _ = tokio::fs::create_dir_all(dir).await;
+                                            if tokio::fs::write(&path, &data).await.is_ok() {
+                                                info!(file = %filename, size = data.len(), "image pasted via WS");
+                                                let _ = socket.send(Message::text(
+                                                    serde_json::json!({"image_saved": filename}).to_string()
+                                                )).await;
+                                            }
+                                        }
                                     }
                                 }
                                 // Any valid JSON is a control message, don't forward to PTY.
@@ -628,6 +663,182 @@ async fn download_recording(
         ],
         data,
     ))
+}
+
+// --- File transfer endpoints ---
+
+/// Reject filenames with path traversal or directory separators.
+fn sanitize_filename(name: &str) -> Result<&str, StatusCode> {
+    if name.is_empty()
+        || name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains('\0')
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(name)
+}
+
+async fn upload_file(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let Some(files_dir) = &state.files_dir else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "file transfer not configured"})),
+        ));
+    };
+
+    // Ensure the directory exists.
+    tokio::fs::create_dir_all(files_dir).await.map_err(|e| {
+        error!(error = %e, "failed to create files directory");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": "server error"})),
+        )
+    })?;
+
+    let mut saved = Vec::new();
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let filename = field
+            .file_name()
+            .unwrap_or("upload")
+            .to_string();
+
+        let filename = sanitize_filename(&filename).map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": format!("invalid filename: {}", filename)})),
+            )
+        })?;
+        let filename = filename.to_string();
+
+        let data = field.bytes().await.map_err(|e| {
+            error!(error = %e, "failed to read upload");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "failed to read upload data"})),
+            )
+        })?;
+
+        if data.len() > state.max_upload_size {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(serde_json::json!({
+                    "error": format!("file too large: {} bytes (max {})", data.len(), state.max_upload_size)
+                })),
+            ));
+        }
+
+        let path = files_dir.join(&filename);
+        tokio::fs::write(&path, &data).await.map_err(|e| {
+            error!(error = %e, "failed to write file");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "failed to save file"})),
+            )
+        })?;
+
+        info!(file = %filename, size = data.len(), "file uploaded");
+        saved.push(serde_json::json!({
+            "filename": filename,
+            "size": data.len(),
+        }));
+    }
+
+    Ok(Json(serde_json::json!({ "uploaded": saved })))
+}
+
+async fn download_file(
+    State(state): State<AppState>,
+    Path(filename): Path<String>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let Some(files_dir) = &state.files_dir else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let filename = sanitize_filename(&filename)?;
+    let path = files_dir.join(filename);
+
+    if !path.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let data = tokio::fs::read(&path).await.map_err(|e| {
+        error!(error = %e, "failed to read file");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let disposition = format!("attachment; filename=\"{}\"", filename);
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (header::CONTENT_DISPOSITION, disposition),
+        ],
+        data,
+    ))
+}
+
+async fn list_files(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let Some(files_dir) = &state.files_dir else {
+        return Ok(Json(serde_json::json!({ "files": [] })));
+    };
+
+    if !files_dir.exists() {
+        return Ok(Json(serde_json::json!({ "files": [] })));
+    }
+
+    let mut entries = Vec::new();
+    let mut dir = tokio::fs::read_dir(files_dir).await.map_err(|e| {
+        error!(error = %e, "failed to list files");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    while let Ok(Some(entry)) = dir.next_entry().await {
+        let meta = entry.metadata().await.ok();
+        if let Some(m) = &meta {
+            if !m.is_file() {
+                continue;
+            }
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let size = meta.map(|m| m.len()).unwrap_or(0);
+        entries.push(serde_json::json!({
+            "filename": name,
+            "size": size,
+        }));
+    }
+
+    Ok(Json(serde_json::json!({ "files": entries })))
+}
+
+async fn delete_file(
+    State(state): State<AppState>,
+    Path(filename): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let Some(files_dir) = &state.files_dir else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let filename = sanitize_filename(&filename)?;
+    let path = files_dir.join(filename);
+
+    if !path.exists() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    tokio::fs::remove_file(&path).await.map_err(|e| {
+        error!(error = %e, "failed to delete file");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    info!(file = %filename, "file deleted");
+    Ok(Json(serde_json::json!({ "status": "deleted", "filename": filename })))
 }
 
 /// Start auto-recording for a session. Called from server startup when auto_record is enabled.

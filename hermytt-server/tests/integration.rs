@@ -29,6 +29,8 @@ async fn start_server() -> String {
         config_path: None,
         tls: None,
         recording_dir: None,
+        files_dir: None,
+        max_upload_size: 10 * 1024 * 1024,
     });
 
     let sessions_clone = sessions.clone();

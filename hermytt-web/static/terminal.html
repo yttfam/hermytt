@@ -282,6 +282,32 @@ function connectSession(session) {
     }
   });
 
+  // Clipboard paste — intercept image data, send as control message
+  session.container.addEventListener('paste', (e) => {
+    if (ws.readyState !== WebSocket.OPEN || !authed) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        if (!blob) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          // result is "data:image/png;base64,XXXX" — strip the prefix
+          const b64 = reader.result.split(',')[1];
+          if (b64) {
+            const ext = item.type.split('/')[1] || 'png';
+            ws.send(JSON.stringify({ paste_image: { name: `clipboard.${ext}`, data: b64 } }));
+          }
+        };
+        reader.readAsDataURL(blob);
+        return; // only handle first image
+      }
+    }
+    // Plain text paste: let crytter/browser handle it normally
+  });
+
   // Mouse wheel scroll
   session.container.addEventListener('wheel', (e) => {
     const lines = Math.round(e.deltaY / 20);

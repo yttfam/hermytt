@@ -32,6 +32,11 @@ pub struct ServerConfig {
     pub tls_cert: Option<String>,
     /// Path to TLS private key PEM file.
     pub tls_key: Option<String>,
+    /// Directory for file uploads/downloads. Disabled if not set.
+    pub files_dir: Option<String>,
+    /// Maximum upload size in bytes. Default: 10MB.
+    #[serde(default = "default_max_upload_size")]
+    pub max_upload_size: usize,
 }
 
 impl Default for ServerConfig {
@@ -44,6 +49,8 @@ impl Default for ServerConfig {
             auto_record: false,
             tls_cert: None,
             tls_key: None,
+            files_dir: None,
+            max_upload_size: default_max_upload_size(),
         }
     }
 }
@@ -94,6 +101,9 @@ fn default_shell() -> String {
 }
 fn default_scrollback() -> usize {
     1000
+}
+fn default_max_upload_size() -> usize {
+    10 * 1024 * 1024 // 10MB
 }
 fn default_rest_port() -> u16 {
     7777

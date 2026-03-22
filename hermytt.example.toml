@@ -6,6 +6,8 @@ scrollback = 1000
 # auto_record = false  # auto-record all sessions when recording_dir is set
 # tls_cert = "/path/to/cert.pem"
 # tls_key = "/path/to/key.pem"
+# files_dir = "/tmp/hermytt-files"  # file upload/download directory (disabled if not set)
+# max_upload_size = 10485760  # 10MB default
 
 [auth]
 # token = "generate-with-hermytt-server-gen-token"

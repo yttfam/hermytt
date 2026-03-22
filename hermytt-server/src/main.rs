@@ -191,6 +191,8 @@ async fn start_server(
             config_path: config_path.map(String::from),
             tls: tls_config.clone(),
             recording_dir: config.server.recording_dir.as_ref().map(std::path::PathBuf::from),
+            files_dir: config.server.files_dir.as_ref().map(std::path::PathBuf::from),
+            max_upload_size: config.server.max_upload_size,
         });
         let sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {
