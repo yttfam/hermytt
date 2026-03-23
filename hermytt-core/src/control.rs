@@ -59,6 +59,8 @@ pub enum ShyttiMessage {
     },
     ShellDied {
         shell_id: String,
+        #[serde(default)]
+        session_id: Option<String>,
     },
 }
 

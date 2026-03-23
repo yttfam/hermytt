@@ -1257,8 +1257,18 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                 ShyttiMessage::KillOk { shell_id } => {
                                     info!(name = %name, shell = %shell_id, "kill ok");
                                 }
-                                ShyttiMessage::ShellDied { shell_id } => {
+                                ShyttiMessage::ShellDied { shell_id, session_id } => {
                                     info!(name = %name, shell = %shell_id, "shell died");
+                                    // Send exit sentinel to the session so browsers get {"exit":true}.
+                                    if let Some(sid) = session_id {
+                                        if let Some(handle) = state.sessions.get_session(&sid).await {
+                                            let _ = handle.output_tx.send(
+                                                hermytt_core::session::PTY_EXIT_SENTINEL.to_vec()
+                                            );
+                                        }
+                                        // Clean up the managed session.
+                                        let _ = state.sessions.unregister_session(&sid).await;
+                                    }
                                 }
                             }
                         }
