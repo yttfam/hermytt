@@ -3,8 +3,8 @@
 Transport-agnostic terminal multiplexer. One PTY, any client that speaks text.
 
 ```
-                    ┌─── REST API (/stdin, /stdout SSE, /exec)
-                    ├─── WebSocket (bidirectional, full terminal)
+                    ┌─── REST API (/stdin, /stdout, /exec)
+                    ├─── WebSocket (full terminal)
 PTY (bash/zsh) ────┼─── MQTT (command → response)
                     └─── Raw TCP (netcat-compatible)
 ```
@@ -13,36 +13,38 @@ The hermit lives alone. But he talks to everyone.
 
 ## Install
 
+Download a binary from [releases](https://github.com/calibrae/hermytt/releases):
+
 ```bash
-cargo install --path hermytt-server
+curl -fSL https://github.com/calibrae/hermytt/releases/latest/download/hermytt-server-linux-x86_64 -o hermytt-server
+chmod +x hermytt-server
 ```
 
 Or build from source:
 
 ```bash
 cargo build --release
-# → target/release/hermytt-server (~4MB)
 ```
 
-Single static binary. No runtime dependencies.
+Single static binary. Zero runtime dependencies. ~4-7MB depending on platform.
 
 ## Quick start
 
 ```bash
-# generate config + auth token
 hermytt-server example-config > hermytt.toml
 hermytt-server gen-token
 # paste token into hermytt.toml under [auth]
 
-# start
 hermytt-server start -c hermytt.toml
 ```
 
-## Two execution models
+## How it works
 
-**Stream** (WebSocket, TCP) — full interactive terminal. Colors, tab completion, TUIs, vim, htop. Connect with any WebSocket client or netcat.
+Hermytt has two execution models:
 
-**Exec** (REST `/exec`, MQTT) — run a command, get stdout/stderr/exit_code. Clean, fast, no PTY. Use for automation, bots, scripts.
+**Stream** (WebSocket, TCP) — full bidirectional PTY. Interactive terminal with colors, tab completion, TUIs, vim, htop. Connect with any WebSocket client or `nc`.
+
+**Exec** (REST `/exec`, MQTT) — run a command, get `stdout`/`stderr`/`exit_code`. No PTY, no ANSI, no junk. For automation, bots, and scripts.
 
 ## Transports
 
@@ -55,33 +57,29 @@ hermytt-server start -c hermytt.toml
 ### REST
 
 ```bash
-# execute a command (direct, no PTY)
+# Direct exec (no PTY)
 curl -X POST http://host:7777/exec \
   -H 'X-Hermytt-Key: TOKEN' \
   -H 'Content-Type: application/json' \
   -d '{"input": "uptime"}'
 # → {"stdout":"...","stderr":"","exit_code":0}
 
-# PTY: send to stdin / stream output (SSE)
+# PTY stream
 curl -X POST http://host:7777/stdin -H 'X-Hermytt-Key: TOKEN' \
-  -H 'Content-Type: application/json' -d '{"input": "ls -la"}'
+  -H 'Content-Type: application/json' -d '{"input": "ls"}'
 curl -N http://host:7777/stdout -H 'X-Hermytt-Key: TOKEN'
 
-# sessions
+# Sessions
 curl -X POST http://host:7777/session -H 'X-Hermytt-Key: TOKEN'
 curl http://host:7777/sessions -H 'X-Hermytt-Key: TOKEN'
 
-# file transfer
-curl -X POST http://host:7777/files/upload -H 'X-Hermytt-Key: TOKEN' \
-  -F 'file=@local.txt'
-curl http://host:7777/files -H 'X-Hermytt-Key: TOKEN'
+# File transfer
+curl -X POST http://host:7777/files/upload -H 'X-Hermytt-Key: TOKEN' -F 'file=@local.txt'
 curl http://host:7777/files/local.txt -H 'X-Hermytt-Key: TOKEN' -o local.txt
 
-# session recording
+# Recording (asciicast v2, playable with asciinema)
 curl -X POST http://host:7777/session/ID/record -H 'X-Hermytt-Key: TOKEN'
-curl -X POST http://host:7777/session/ID/stop-record -H 'X-Hermytt-Key: TOKEN'
 curl http://host:7777/recordings -H 'X-Hermytt-Key: TOKEN'
-# recordings are asciicast v2, playable with: asciinema play file.cast
 ```
 
 ### WebSocket
@@ -91,11 +89,12 @@ ws://host:7777/ws              → default session
 ws://host:7777/ws/SESSION_ID   → specific session
 ```
 
-First message: send auth token. Server replies `auth:ok`.
+First message: auth token. Server replies `auth:ok`. Then bidirectional PTY I/O.
 
 Control messages (JSON, intercepted before PTY):
-- `{"resize":[cols,rows]}` — resize PTY
-- `{"paste_image":{"name":"file.png","data":"base64..."}}` — save image to files_dir
+- `{"resize":[cols,rows]}` — resize terminal
+- `{"paste_image":{"name":"file.png","data":"base64..."}}` — save image
+- `{"exit":true}` — sent by server when shell exits
 
 ### MQTT
 
@@ -108,24 +107,64 @@ mosquitto_sub -t hermytt/default/out
 
 ```bash
 nc host 7779
-# type token, press enter, full terminal
+# type token, press enter, you're in
 ```
 
-## Web UI (optional)
+## Web UI (optional, embedded)
 
-Hermytt includes an optional embedded web UI powered by [crytter](https://github.com/calibrae/crytter) (86KB WASM terminal emulator) and [prytty](https://github.com/calibrae/prytty) (75KB WASM syntax highlighter). The web UI is decoupled from the core — hermytt works headless without it.
+Hermytt ships with an optional web interface powered by [crytter](https://github.com/calibrae/crytter) (86KB WASM terminal) and [prytty](https://github.com/calibrae/prytty) (75KB WASM syntax highlighter). The web UI is decoupled from the core — hermytt works headless.
 
-When enabled: tabbed terminal at `/`, admin dashboard at `/admin`.
+- `/` — tabbed terminal with keyboard shortcuts
+- `/admin` — command center: family services, sessions, transports, exec, config
 
-## Related projects
+## The YTT Family
+
+Hermytt is the patriarch of an ecosystem of composable tools:
 
 | Project | Role |
 |---------|------|
-| [crytter](https://github.com/calibrae/crytter) | Rust/WASM terminal emulator (86KB) |
-| [prytty](https://github.com/calibrae/prytty) | Rust/WASM syntax highlighting (75KB) |
+| **hermytt** | Transport multiplexer — routes bytes, auth, sessions |
+| [shytti](https://github.com/calibrae/shytti) | Shell orchestrator — spawns and manages shells |
+| [crytter](https://github.com/calibrae/crytter) | WASM terminal emulator (86KB) |
+| [prytty](https://github.com/calibrae/prytty) | WASM syntax highlighter (75KB) |
+| [fytti](https://github.com/calibrae/fytti) | GPU-accelerated WASM app runtime |
+| [wytti](https://github.com/calibrae/wytti) | WASI sandbox runtime |
 | [hermytt-bots](https://github.com/calibrae/hermytt-bots) | Chat bot bridges (Telegram, Signal, Discord) |
-| [fytti](https://github.com/calibrae/fytti) | WASM app player (hosts crytter + prytty) |
-| [wytti](https://github.com/calibrae/wytti) | WASI runtime (sandboxed exec backend) |
+
+### Service registry
+
+Family members announce themselves to hermytt and appear in the admin dashboard:
+
+```bash
+curl -X POST http://host:7777/registry/announce \
+  -H 'X-Hermytt-Key: TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"shytti-mista","role":"shell","endpoint":"ws://10.10.0.3:7778"}'
+
+curl http://host:7777/registry -H 'X-Hermytt-Key: TOKEN'
+```
+
+### Bootstrap
+
+Deploy Shytti to a new machine with one command:
+
+```bash
+curl -H 'X-Hermytt-Key: TOKEN' http://hermytt:7777/bootstrap/shytti | sudo bash
+```
+
+Downloads binary, writes config, installs systemd service, starts it.
+
+### Internal session API (for Shytti)
+
+Shytti manages shells externally and connects them through hermytt:
+
+```
+POST   /internal/session           → register managed session
+DELETE /internal/session/{id}      → unregister
+WS     /internal/session/{id}/pipe → bidirectional PTY bridge
+```
+
+If no shell orchestrator registers within 5 seconds, hermytt falls back to spawning a local PTY.
 
 ## Config
 
@@ -141,7 +180,7 @@ scrollback = 1000
 # files_dir = "/tmp/hermytt-files"
 
 [auth]
-token = "your-secret-token"
+token = "your-token"
 
 [transport.rest]
 port = 7777
@@ -156,7 +195,7 @@ password = "secret"
 port = 7779
 ```
 
-All transports optional. Only include what you need.
+All transports optional.
 
 ## CLI
 
@@ -169,41 +208,37 @@ hermytt-server example-config
 ## Architecture
 
 ```
-hermytt-core/         PTY sessions, output buffering, direct exec, recording
-hermytt-transport/    Transport trait + REST/WS, MQTT, TCP (pure API, no web)
-hermytt-web/          Optional web UI (decoupled, injectable)
-hermytt-server/       Config, CLI, transport wiring
+hermytt-core/         PTY sessions, exec, recording, service registry
+hermytt-transport/    REST/WS, MQTT, TCP, TLS (pure API, no web)
+hermytt-web/          Optional embedded web UI (decoupled)
+hermytt-server/       Config, CLI, wiring
 ```
+
+## Security
+
+- Auth on all transports (header, first-message WS, first-line TCP, broker)
+- Default bind `127.0.0.1`
+- TLS support (rustls)
+- Exec: 30s timeout, 1MB output cap, 8 concurrent max
+- Session limit (default 16), file upload limit (default 10MB)
+- Path traversal protection, XSS escaping
+- Multiple OWASP audit passes
 
 ## Testing
 
 ```bash
-cargo test              # 48 unit + integration tests
-npx playwright test     # browser e2e tests (when web UI enabled)
+cargo test              # 55 unit + integration tests
+npx playwright test     # browser e2e tests
 ```
 
-Integration tests use an embedded MQTT broker — no external infra needed.
+Integration tests spin up an embedded MQTT broker — no external infra.
 
-## Cross-compile
+## Cross-compile & deploy
 
 ```bash
-# Linux static binary (from macOS)
-./deploy.sh
+./deploy.sh   # builds linux-musl, scp to mista, restarts systemd
 ```
-
-Requires `musl-cross` (`brew install musl-cross`).
-
-## Security
-
-- Auth on all transports (header, first-message WS, first-line TCP, broker auth)
-- Default bind `127.0.0.1`
-- TLS support (rustls)
-- Exec: 30s timeout, 1MB output cap, 8 concurrent max
-- Session limit (default 16)
-- File upload size limit (default 10MB)
-- Path traversal protection on all file operations
-- Multiple OWASP audit passes
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT
