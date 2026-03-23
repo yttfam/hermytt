@@ -217,7 +217,7 @@ async function refreshFamily() {
     if (!res.ok) return;
     const data = await res.json();
     const services = data.services || [];
-    document.getElementById('s-services').textContent = services.filter(s => s.status === 'Connected').length;
+    document.getElementById('s-services').textContent = services.filter(s => s.status === 'connected').length;
     document.getElementById('svc-count').textContent = services.length ? ` (${services.length})` : '';
     const tbody = document.getElementById('family-table');
     if (!services.length) {
@@ -225,7 +225,7 @@ async function refreshFamily() {
       return;
     }
     tbody.innerHTML = services.map(s => {
-      const on = s.status === 'Connected';
+      const on = s.status === 'connected';
       const dotCls = on ? 'dot-on' : 'dot-off';
       const roleMap = { Shell:'shell', Renderer:'renderer', Highlighter:'highlighter', Sandbox:'sandbox', Bot:'bot' };
       const role = roleMap[s.role] || 'shell';
