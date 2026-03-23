@@ -121,6 +121,7 @@ pub struct Session {
     child: tokio::sync::Mutex<Option<Box<dyn Child + Send>>>,
     master: std::sync::Mutex<Option<Box<dyn portable_pty::MasterPty + Send>>>,
     _slave: std::sync::Mutex<Option<Box<dyn portable_pty::SlavePty + Send>>>,
+    managed: bool,
     shell: String,
 }
 
@@ -146,6 +147,7 @@ impl Session {
             child: tokio::sync::Mutex::new(None),
             master: std::sync::Mutex::new(None),
             _slave: std::sync::Mutex::new(None),
+            managed: false,
             shell: shell.to_string(),
         }))
     }
@@ -242,6 +244,10 @@ impl Session {
     }
 
     pub async fn is_alive(&self) -> bool {
+        // Managed sessions are alive as long as they're registered.
+        if self.managed {
+            return true;
+        }
         if let Some(child) = self.child.lock().await.as_mut() {
             child.try_wait().ok().flatten().is_none()
         } else {
@@ -328,6 +334,7 @@ impl SessionManager {
             child: tokio::sync::Mutex::new(None),
             master: std::sync::Mutex::new(None),
             _slave: std::sync::Mutex::new(None),
+            managed: true,
             shell: String::new(),
         });
 

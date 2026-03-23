@@ -301,7 +301,7 @@ document.getElementById('btn-new-session').addEventListener('click', async () =>
     if (!host) {
       await fetch('/session', { method: 'POST', headers: authHeaders() });
     } else {
-      const res = await fetch('/hosts/' + encodeURIComponent(host) + '/spawn', { method: 'POST', headers: authHeaders() });
+      const res = await fetch('/hosts/' + encodeURIComponent(host) + '/spawn', { method: 'POST', headers: authHeaders(), body: JSON.stringify({shell: '/bin/bash'}) });
       if (!res.ok) { const d = await res.json(); banner(d.error || 'spawn failed', 'err'); }
     }
     refreshSessions();
