@@ -130,7 +130,7 @@ tr:hover td { background: rgba(74,138,244,0.03); }
 <div class="grid">
   <!-- Family / Services -->
   <div class="panel full">
-    <div class="panel-hdr">Family<span id="svc-count"></span></div>
+    <div class="panel-hdr">Family<span id="svc-count"></span> <button class="btn btn-blue" id="btn-add-host" style="font-size:10px">+ add host</button></div>
     <div class="panel-body" style="padding:0">
       <table>
         <thead><tr><th></th><th>name</th><th>role</th><th>endpoint</th><th>last seen</th><th>meta</th></tr></thead>
@@ -260,6 +260,30 @@ async function refreshSessions() {
     </tr>
   `).join('') || '<tr><td colspan="3" class="empty-row">no sessions</td></tr>';
 }
+
+document.getElementById('btn-add-host').addEventListener('click', () => {
+  document.getElementById('modal-title').textContent = 'Pair Host';
+  document.getElementById('modal-fields').innerHTML = `
+    <div class="field">
+      <label>pairing token</label>
+      <input type="text" id="pair-token" placeholder="paste token from shytti pair" spellcheck="false" autocomplete="off">
+      <div class="hint">run "shytti pair" on the target machine, paste the token here</div>
+    </div>
+  `;
+  document.getElementById('modal-bg').classList.add('active');
+  document.getElementById('modal-save').onclick = async () => {
+    const token = document.getElementById('pair-token').value.trim();
+    if (!token) return;
+    closeModal();
+    banner('pairing...', 'warn');
+    const res = await fetch('/hosts/pair', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ token }) });
+    const data = await res.json();
+    if (!res.ok) { banner(data.error || 'pairing failed', 'err'); return; }
+    banner('paired with ' + data.name, 'ok');
+    setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000);
+    refreshAll();
+  };
+});
 
 async function killSession(id) {
   if (!confirm('Kill session ' + id.slice(0,8) + '?')) return;

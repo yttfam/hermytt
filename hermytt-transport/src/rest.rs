@@ -60,6 +60,8 @@ struct AppState {
     max_upload_size: usize,
     registry: Arc<ServiceRegistry>,
     control_hub: Arc<hermytt_core::ControlHub>,
+    paired_hosts: Arc<Mutex<hermytt_core::pairing::PairedHosts>>,
+    keys_path: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -97,6 +99,10 @@ impl Transport for RestTransport {
             max_upload_size: self.max_upload_size,
             registry: Arc::new(ServiceRegistry::new()),
             control_hub: hermytt_core::ControlHub::new(),
+            keys_path: hermytt_core::pairing::keys_path(self.config_path.as_deref()),
+            paired_hosts: Arc::new(Mutex::new(hermytt_core::pairing::PairedHosts::load(
+                &hermytt_core::pairing::keys_path(self.config_path.as_deref()),
+            ))),
         };
 
         // API routes behind auth.
@@ -127,6 +133,7 @@ impl Transport for RestTransport {
             // Host management (shytti instances).
             .route("/hosts", get(list_hosts))
             .route("/hosts/{name}/spawn", post(spawn_on_host))
+            .route("/hosts/pair", post(pair_host))
             // Bootstrap scripts for family members.
             .route("/bootstrap/shytti", get(bootstrap_shytti))
             // Internal session API (for Shytti and external orchestrators).
@@ -1329,5 +1336,186 @@ async fn spawn_on_host(
         }))),
         Err(e) => Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e})))),
     }
+}
+
+// --- Mode 2: Pairing (hermytt connects out to shytti) ---
+
+#[derive(Deserialize)]
+struct PairHostBody {
+    token: String,
+}
+
+async fn pair_host(
+    State(state): State<AppState>,
+    Json(body): Json<PairHostBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    use hermytt_core::pairing::PairingToken;
+
+    // Decode token.
+    let token = PairingToken::decode(&body.token).map_err(|e| {
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": format!("invalid token: {}", e)})))
+    })?;
+
+    let pair_url = token.ws_url();
+    info!(url = %pair_url, "pairing with shytti...");
+
+    // Connect to shytti's /pair WS.
+    let (mut ws, _) = tokio_tungstenite::connect_async(&pair_url).await.map_err(|e| {
+        (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": format!("connection failed: {}", e)})))
+    })?;
+
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message as TsMessage;
+
+    // Send pairing key.
+    let pair_msg = serde_json::json!({"pair_key": token.key});
+    ws.send(TsMessage::Text(pair_msg.to_string().into())).await.map_err(|e| {
+        (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": format!("send failed: {}", e)})))
+    })?;
+
+    // Wait for response with long-lived key.
+    let resp = tokio::time::timeout(std::time::Duration::from_secs(10), ws.next()).await
+        .map_err(|_| (StatusCode::GATEWAY_TIMEOUT, Json(serde_json::json!({"error": "pairing timed out"}))))?
+        .ok_or_else(|| (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "connection closed"}))))?
+        .map_err(|e| (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": format!("ws error: {}", e)}))))?;
+
+    let resp_text = match resp {
+        TsMessage::Text(t) => t.to_string(),
+        _ => return Err((StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "unexpected response"})))),
+    };
+
+    let resp_val: serde_json::Value = serde_json::from_str(&resp_text).map_err(|_| {
+        (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "invalid response"})))
+    })?;
+
+    let long_lived_key = resp_val.get("long_lived_key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "no long_lived_key in response"}))))?
+        .to_string();
+
+    let host_name = resp_val.get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&format!("shytti-{}:{}", token.ip, token.port))
+        .to_string();
+
+    // Store the key.
+    {
+        let mut hosts = state.paired_hosts.lock().await;
+        hosts.add(
+            hermytt_core::pairing::PairedHost {
+                name: host_name.clone(),
+                ip: token.ip.clone(),
+                port: token.port,
+                key: long_lived_key.clone(),
+            },
+            &state.keys_path,
+        );
+    }
+
+    info!(name = %host_name, ip = %token.ip, "pairing successful");
+
+    // Now this WS becomes the control channel. Spawn the control loop.
+    let control_hub = state.control_hub.clone();
+    let registry = state.registry.clone();
+    let auth_token = state.auth_token.clone();
+    let name = host_name.clone();
+
+    tokio::spawn(async move {
+        run_outbound_control(ws, name, control_hub, registry).await;
+    });
+
+    Ok(Json(serde_json::json!({
+        "status": "paired",
+        "name": host_name,
+        "ip": token.ip,
+        "port": token.port,
+    })))
+}
+
+/// Run the control protocol on an outbound WS (Mode 2).
+/// Same protocol as handle_control_ws but we're the client.
+async fn run_outbound_control(
+    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    name: String,
+    control_hub: Arc<hermytt_core::ControlHub>,
+    registry: Arc<ServiceRegistry>,
+) {
+    use futures_util::{SinkExt, StreamExt};
+    use hermytt_core::control::{ControlMessage, ShyttiMessage};
+    use tokio_tungstenite::tungstenite::Message as TsMessage;
+
+    let (mut ws_tx, mut ws_rx) = ws.split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<ControlMessage>(64);
+
+    control_hub.register(name.clone(), serde_json::Value::Null, tx).await;
+
+    let svc = hermytt_core::registry::ServiceInfo {
+        name: name.clone(),
+        role: hermytt_core::registry::ServiceRole::Shell,
+        endpoint: "paired".to_string(),
+        status: hermytt_core::registry::ServiceStatus::Connected,
+        last_seen_instant: None,
+        last_seen: 0,
+        meta: serde_json::Value::Null,
+    };
+    registry.register(svc).await;
+
+    info!(name = %name, "outbound control channel active");
+
+    loop {
+        tokio::select! {
+            msg = ws_rx.next() => {
+                match msg {
+                    Some(Ok(TsMessage::Text(text))) => {
+                        if let Ok(shytti_msg) = serde_json::from_str::<ShyttiMessage>(&text) {
+                            match shytti_msg {
+                                ShyttiMessage::Heartbeat { meta } => {
+                                    control_hub.heartbeat(&name, meta.clone()).await;
+                                    let svc = hermytt_core::registry::ServiceInfo {
+                                        name: name.clone(),
+                                        role: hermytt_core::registry::ServiceRole::Shell,
+                                        endpoint: "paired".to_string(),
+                                        status: hermytt_core::registry::ServiceStatus::Connected,
+                                        last_seen_instant: None,
+                                        last_seen: 0,
+                                        meta,
+                                    };
+                                    registry.register(svc).await;
+                                }
+                                ShyttiMessage::SpawnOk { req_id, shell_id, session_id } => {
+                                    control_hub.handle_spawn_ok(&req_id, shell_id, session_id).await;
+                                }
+                                ShyttiMessage::SpawnErr { req_id, error } => {
+                                    control_hub.handle_spawn_err(&req_id, error).await;
+                                }
+                                ShyttiMessage::KillOk { .. } => {}
+                                ShyttiMessage::ShellDied { shell_id: _, session_id } => {
+                                    if let Some(sid) = session_id {
+                                        // Same as Mode 1: send exit sentinel + unregister.
+                                        // (handled by caller if needed)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(TsMessage::Close(_))) | None => break,
+                    _ => {}
+                }
+            }
+            cmd = rx.recv() => {
+                match cmd {
+                    Some(msg) => {
+                        let json = serde_json::to_string(&msg).unwrap_or_default();
+                        if ws_tx.send(TsMessage::Text(json.into())).await.is_err() { break; }
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+
+    control_hub.unregister(&name).await;
+    registry.unregister(&name).await;
+    info!(name = %name, "outbound control channel closed");
 }
 

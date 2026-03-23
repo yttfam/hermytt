@@ -59,6 +59,7 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
 base64 = "0.22"
+tokio-tungstenite = "0.28"
 
 # Internal crates
 hermytt-core = { path = "hermytt-core" }

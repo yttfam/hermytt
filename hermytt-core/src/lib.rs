@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod control;
 pub mod exec;
+pub mod pairing;
 pub mod platform;
 pub mod recording;
 pub mod registry;

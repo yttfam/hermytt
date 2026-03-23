@@ -1013,6 +1013,7 @@ name = "hermytt-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytes",
  "portable-pty",
  "serde",
@@ -1067,6 +1068,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream",
+ "tokio-tungstenite",
  "toml",
  "tower-http",
  "tracing",
