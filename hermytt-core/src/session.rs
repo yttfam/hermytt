@@ -15,6 +15,7 @@ pub const PTY_EXIT_SENTINEL: &[u8] = b"\x1b[HERMYTT_EXIT]";
 #[derive(Clone)]
 pub struct SessionHandle {
     pub id: SessionId,
+    pub host: Option<String>,
     pub stdin_tx: mpsc::Sender<Vec<u8>>,
     pub output_tx: broadcast::Sender<Vec<u8>>,
     pub scrollback: Arc<std::sync::Mutex<ScrollbackBuffer>>,
@@ -136,6 +137,7 @@ impl Session {
 
         let handle = SessionHandle {
             id: id.clone(),
+            host: None,
             stdin_tx,
             output_tx,
             scrollback,
@@ -301,7 +303,7 @@ impl SessionManager {
 
     /// Register a managed session (no PTY — Shytti or external process owns it).
     /// Returns a SessionHandle with stdin/output channels for the external process to use.
-    pub async fn register_session(&self, id: Option<String>) -> Result<SessionHandle> {
+    pub async fn register_session(&self, id: Option<String>, host: Option<String>) -> Result<SessionHandle> {
         let mut sessions = self.sessions.write().await;
         anyhow::ensure!(
             sessions.len() < self.max_sessions,
@@ -321,6 +323,7 @@ impl SessionManager {
 
         let handle = SessionHandle {
             id: session_id.clone(),
+            host,
             stdin_tx,
             output_tx,
             scrollback,
@@ -378,6 +381,12 @@ impl SessionManager {
 
     pub async fn list_sessions(&self) -> Vec<SessionId> {
         self.sessions.read().await.keys().cloned().collect()
+    }
+
+    pub async fn list_sessions_with_host(&self) -> Vec<(SessionId, Option<String>)> {
+        self.sessions.read().await.values()
+            .map(|s| (s.handle.id.clone(), s.handle.host.clone()))
+            .collect()
     }
 
     pub async fn default_session(&self) -> Result<SessionHandle> {

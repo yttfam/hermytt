@@ -74,6 +74,8 @@ struct StdinBody {
 #[derive(Serialize)]
 struct SessionInfo {
     id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -354,13 +356,13 @@ async fn create_session(
         .create_session()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(SessionInfo { id: handle.id }))
+    Ok(Json(SessionInfo { id: handle.id, host: handle.host }))
 }
 
 async fn list_sessions(State(state): State<AppState>) -> Json<SessionListResponse> {
-    let ids = state.sessions.list_sessions().await;
+    let sessions = state.sessions.list_sessions_with_host().await;
     Json(SessionListResponse {
-        sessions: ids.into_iter().map(|id| SessionInfo { id }).collect(),
+        sessions: sessions.into_iter().map(|(id, host)| SessionInfo { id, host }).collect(),
     })
 }
 
@@ -1069,7 +1071,7 @@ async fn register_managed_session(
     let id = body.and_then(|b| b.id.clone());
     let handle = state
         .sessions
-        .register_session(id)
+        .register_session(id, None)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(serde_json::json!({
@@ -1257,7 +1259,7 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                 }
                                 ShyttiMessage::SpawnOk { req_id, shell_id, session_id } => {
                                     // Register the managed session so it appears in /sessions.
-                                    let _ = state.sessions.register_session(Some(session_id.clone())).await;
+                                    let _ = state.sessions.register_session(Some(session_id.clone()), Some(name.clone())).await;
                                     info!(name = %name, session = %session_id, "spawn ok — session registered");
 
                                     // Spawn stdin forwarder: session stdin → control WS Input messages.
@@ -1517,7 +1519,7 @@ async fn run_outbound_control(
                                     registry.register(svc).await;
                                 }
                                 ShyttiMessage::SpawnOk { req_id, shell_id, session_id } => {
-                                    let _ = sessions.register_session(Some(session_id.clone())).await;
+                                    let _ = sessions.register_session(Some(session_id.clone()), Some(name.clone())).await;
                                     info!(name = %name, session = %session_id, "spawn ok — session registered");
 
                                     // Stdin forwarder: session stdin → control WS Input.
