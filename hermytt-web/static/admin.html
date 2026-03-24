@@ -133,7 +133,7 @@ tr:hover td { background: rgba(74,138,244,0.03); }
     <div class="panel-hdr">Family<span id="svc-count"></span> <button class="btn btn-blue" id="btn-add-host" style="font-size:10px">+ add host</button></div>
     <div class="panel-body" style="padding:0">
       <table>
-        <thead><tr><th></th><th>name</th><th>role</th><th>endpoint</th><th>last seen</th><th>meta</th></tr></thead>
+        <thead><tr><th></th><th>name</th><th>role</th><th>host</th><th>mode</th><th>last seen</th></tr></thead>
         <tbody id="family-table"></tbody>
       </table>
     </div>
@@ -221,7 +221,7 @@ async function refreshFamily() {
     document.getElementById('svc-count').textContent = services.length ? ` (${services.length})` : '';
     const tbody = document.getElementById('family-table');
     if (!services.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-row">no services registered</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-row">no family members connected</td></tr>';
       return;
     }
     tbody.innerHTML = services.map(s => {
@@ -234,9 +234,9 @@ async function refreshFamily() {
         <td><span class="dot ${dotCls}"></span></td>
         <td>${esc(s.name)}</td>
         <td><span class="role role-${role}">${esc(role)}</span></td>
-        <td style="color:var(--text-dim)">${esc(s.endpoint || '-')}</td>
+        <td style="color:var(--text-dim)">${esc(s.meta?.host || s.name)}</td>
+        <td><span class="meta-tag">${esc(s.endpoint === 'control-ws' ? 'mode 1' : s.endpoint === 'paired' ? 'mode 2' : s.endpoint || '-')}</span></td>
         <td style="color:var(--text-muted)">${relTime(s.last_seen)}</td>
-        <td>${metaStr || '<span style="color:var(--text-muted)">-</span>'}</td>
       </tr>`;
     }).join('');
   } catch(e) {}
