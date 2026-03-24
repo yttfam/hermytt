@@ -38,6 +38,7 @@ pub struct RestTransport {
     pub extra_routes: Option<Router>,
     /// Shared control hub for shytti management. Created externally so main.rs can access it.
     pub control_hub: Option<Arc<hermytt_core::ControlHub>>,
+    pub registry: Option<Arc<ServiceRegistry>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -101,7 +102,7 @@ impl Transport for RestTransport {
             recordings: Arc::new(Mutex::new(HashMap::new())),
             files_dir: self.files_dir.clone(),
             max_upload_size: self.max_upload_size,
-            registry: Arc::new(ServiceRegistry::new()),
+            registry: self.registry.clone().unwrap_or_else(|| Arc::new(ServiceRegistry::new())),
             control_hub: self.control_hub.clone().unwrap_or_else(|| hermytt_core::ControlHub::new()),
             keys_path: hermytt_core::pairing::keys_path(self.config_path.as_deref()),
             paired_hosts: Arc::new(Mutex::new(hermytt_core::pairing::PairedHosts::load(
