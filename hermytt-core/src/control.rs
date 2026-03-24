@@ -35,6 +35,11 @@ pub enum ControlMessage {
         cols: u16,
         rows: u16,
     },
+    /// Stdin data for a session (Mode 2 data plane).
+    Input {
+        session_id: String,
+        data: String, // base64
+    },
 }
 
 /// Messages shytti sends to hermytt.
@@ -61,6 +66,11 @@ pub enum ShyttiMessage {
         shell_id: String,
         #[serde(default)]
         session_id: Option<String>,
+    },
+    /// PTY output from shytti (Mode 2 data plane).
+    Data {
+        session_id: String,
+        data: String, // base64
     },
 }
 
@@ -174,6 +184,13 @@ impl ControlHub {
         if let Some(pending) = self.pending_spawns.lock().await.remove(req_id) {
             let _ = pending.tx.send(Err(error));
         }
+    }
+
+    /// Send any control message to a specific shytti.
+    pub async fn send_to(&self, host: &str, msg: ControlMessage) -> Result<(), String> {
+        let conns = self.connections.lock().await;
+        let conn = conns.get(host).ok_or_else(|| format!("host '{}' not connected", host))?;
+        conn.tx.send(msg).await.map_err(|_| "connection lost".to_string())
     }
 
     /// Send a kill command to the shytti that owns a shell.

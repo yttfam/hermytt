@@ -1256,7 +1256,30 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                     state.registry.register(svc).await;
                                 }
                                 ShyttiMessage::SpawnOk { req_id, shell_id, session_id } => {
-                                    info!(name = %name, session = %session_id, "spawn ok");
+                                    // Register the managed session so it appears in /sessions.
+                                    let _ = state.sessions.register_session(Some(session_id.clone())).await;
+                                    info!(name = %name, session = %session_id, "spawn ok — session registered");
+
+                                    // Spawn stdin forwarder: session stdin → control WS Input messages.
+                                    if let Some(mut stdin_rx) = state.sessions.take_stdin_rx(&session_id).await {
+                                        let hub = state.control_hub.clone();
+                                        let host_name = name.clone();
+                                        let sid = session_id.clone();
+                                        tokio::spawn(async move {
+                                            use base64::Engine;
+                                            while let Some(data) = stdin_rx.recv().await {
+                                                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                                                let msg = hermytt_core::control::ControlMessage::Input {
+                                                    session_id: sid.clone(),
+                                                    data: b64,
+                                                };
+                                                if hub.send_to(&host_name, msg).await.is_err() {
+                                                    break;
+                                                }
+                                            }
+                                        });
+                                    }
+
                                     state.control_hub.handle_spawn_ok(&req_id, shell_id, session_id).await;
                                 }
                                 ShyttiMessage::SpawnErr { req_id, error } => {
@@ -1277,6 +1300,14 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                         }
                                         // Clean up the managed session.
                                         let _ = state.sessions.unregister_session(&sid).await;
+                                    }
+                                }
+                                ShyttiMessage::Data { session_id, data } => {
+                                    // PTY output from shytti → broadcast to transports.
+                                    if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data) {
+                                        if let Some(handle) = state.sessions.get_session(&session_id).await {
+                                            let _ = handle.output_tx.send(bytes);
+                                        }
                                     }
                                 }
                             }
@@ -1419,11 +1450,11 @@ async fn pair_host(
     // Now this WS becomes the control channel. Spawn the control loop.
     let control_hub = state.control_hub.clone();
     let registry = state.registry.clone();
-    let auth_token = state.auth_token.clone();
+    let sess = state.sessions.clone();
     let name = host_name.clone();
 
     tokio::spawn(async move {
-        run_outbound_control(ws, name, control_hub, registry).await;
+        run_outbound_control(ws, name, control_hub, registry, sess).await;
     });
 
     Ok(Json(serde_json::json!({
@@ -1441,6 +1472,7 @@ async fn run_outbound_control(
     name: String,
     control_hub: Arc<hermytt_core::ControlHub>,
     registry: Arc<ServiceRegistry>,
+    sessions: Arc<SessionManager>,
 ) {
     use futures_util::{SinkExt, StreamExt};
     use hermytt_core::control::{ControlMessage, ShyttiMessage};
@@ -1485,6 +1517,27 @@ async fn run_outbound_control(
                                     registry.register(svc).await;
                                 }
                                 ShyttiMessage::SpawnOk { req_id, shell_id, session_id } => {
+                                    let _ = sessions.register_session(Some(session_id.clone())).await;
+                                    info!(name = %name, session = %session_id, "spawn ok — session registered");
+
+                                    // Stdin forwarder: session stdin → control WS Input.
+                                    if let Some(mut stdin_rx) = sessions.take_stdin_rx(&session_id).await {
+                                        let hub = control_hub.clone();
+                                        let host_name = name.clone();
+                                        let sid = session_id.clone();
+                                        tokio::spawn(async move {
+                                            use base64::Engine;
+                                            while let Some(data) = stdin_rx.recv().await {
+                                                let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                                                let msg = hermytt_core::control::ControlMessage::Input {
+                                                    session_id: sid.clone(),
+                                                    data: b64,
+                                                };
+                                                if hub.send_to(&host_name, msg).await.is_err() { break; }
+                                            }
+                                        });
+                                    }
+
                                     control_hub.handle_spawn_ok(&req_id, shell_id, session_id).await;
                                 }
                                 ShyttiMessage::SpawnErr { req_id, error } => {
@@ -1493,8 +1546,17 @@ async fn run_outbound_control(
                                 ShyttiMessage::KillOk { .. } => {}
                                 ShyttiMessage::ShellDied { shell_id: _, session_id } => {
                                     if let Some(sid) = session_id {
-                                        // Same as Mode 1: send exit sentinel + unregister.
-                                        // (handled by caller if needed)
+                                        if let Some(handle) = sessions.get_session(&sid).await {
+                                            let _ = handle.output_tx.send(hermytt_core::session::PTY_EXIT_SENTINEL.to_vec());
+                                        }
+                                        let _ = sessions.unregister_session(&sid).await;
+                                    }
+                                }
+                                ShyttiMessage::Data { session_id, data } => {
+                                    if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data) {
+                                        if let Some(handle) = sessions.get_session(&session_id).await {
+                                            let _ = handle.output_tx.send(bytes);
+                                        }
                                     }
                                 }
                             }
@@ -1572,7 +1634,7 @@ pub async fn connect_paired_host(
         info!(name = %host.name, "paired host connected");
         backoff = 1; // reset on success
 
-        run_outbound_control(ws, host.name.clone(), control_hub.clone(), registry.clone()).await;
+        run_outbound_control(ws, host.name.clone(), control_hub.clone(), registry.clone(), sessions.clone()).await;
 
         warn!(name = %host.name, "paired host disconnected, reconnecting in {}s", backoff);
         tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
