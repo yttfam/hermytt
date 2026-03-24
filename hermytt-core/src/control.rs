@@ -99,16 +99,14 @@ impl ControlHub {
         })
     }
 
-    /// Register a new shytti connection. Returns false if name is already taken.
-    pub async fn register(&self, name: String, meta: serde_json::Value, tx: mpsc::Sender<ControlMessage>) -> bool {
+    /// Register a shytti connection. Last-writer-wins: if name exists, the old connection is replaced.
+    pub async fn register(&self, name: String, meta: serde_json::Value, tx: mpsc::Sender<ControlMessage>) {
         let mut conns = self.connections.lock().await;
         if conns.contains_key(&name) {
-            warn!(name = %name, "rejected: name already registered");
-            return false;
+            warn!(name = %name, "replacing stale connection (reconnect)");
         }
         info!(name = %name, "shytti connected");
         conns.insert(name.clone(), ShyttiConnection { name, meta, tx });
-        true
     }
 
     /// Remove a shytti connection.
