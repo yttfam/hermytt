@@ -199,6 +199,9 @@ async fn start_server(
             endpoint: format!("{}:{}", config.server.bind, t.port),
         });
     }
+    // Shared control hub — used by REST transport and Mode 2 reconnect loops.
+    let control_hub = hermytt_core::ControlHub::new();
+
     if let Some(rest_config) = &config.transport.rest {
         let transport = Arc::new(RestTransport {
             port: rest_config.port,
@@ -212,6 +215,7 @@ async fn start_server(
             files_dir: config.server.files_dir.as_ref().map(std::path::PathBuf::from),
             max_upload_size: config.server.max_upload_size,
             extra_routes: Some(hermytt_web::routes()),
+            control_hub: Some(control_hub.clone()),
         });
         let sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {
@@ -257,6 +261,16 @@ async fn start_server(
         warn!("add at least [transport.rest] to your config");
         return Ok(());
     }
+
+    // Reconnect to all Mode 2 paired hosts from stored keys.
+    let keys_path = hermytt_core::pairing::keys_path(config_path);
+    hermytt_transport::rest::spawn_paired_host_connections(
+        &keys_path,
+        auth_token.clone(),
+        control_hub,
+        std::sync::Arc::new(hermytt_core::ServiceRegistry::new()),
+        sessions.clone(),
+    );
 
     futures_util::future::join_all(tasks).await;
 

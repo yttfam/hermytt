@@ -32,6 +32,7 @@ async fn start_server() -> String {
         files_dir: None,
         max_upload_size: 10 * 1024 * 1024,
         extra_routes: None,
+        control_hub: None,
     });
 
     let sessions_clone = sessions.clone();

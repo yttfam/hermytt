@@ -36,6 +36,8 @@ pub struct RestTransport {
     pub max_upload_size: usize,
     /// Optional extra routes merged into the app (e.g., web UI). Must be stateless.
     pub extra_routes: Option<Router>,
+    /// Shared control hub for shytti management. Created externally so main.rs can access it.
+    pub control_hub: Option<Arc<hermytt_core::ControlHub>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -98,7 +100,7 @@ impl Transport for RestTransport {
             files_dir: self.files_dir.clone(),
             max_upload_size: self.max_upload_size,
             registry: Arc::new(ServiceRegistry::new()),
-            control_hub: hermytt_core::ControlHub::new(),
+            control_hub: self.control_hub.clone().unwrap_or_else(|| hermytt_core::ControlHub::new()),
             keys_path: hermytt_core::pairing::keys_path(self.config_path.as_deref()),
             paired_hosts: Arc::new(Mutex::new(hermytt_core::pairing::PairedHosts::load(
                 &hermytt_core::pairing::keys_path(self.config_path.as_deref()),
@@ -1517,5 +1519,85 @@ async fn run_outbound_control(
     control_hub.unregister(&name).await;
     registry.unregister(&name).await;
     info!(name = %name, "outbound control channel closed");
+}
+
+/// Connect to a Mode 2 paired host using the long-lived key.
+/// Reconnects with exponential backoff on disconnect.
+pub async fn connect_paired_host(
+    host: hermytt_core::pairing::PairedHost,
+    auth_token: Option<String>,
+    control_hub: Arc<hermytt_core::ControlHub>,
+    registry: Arc<ServiceRegistry>,
+    sessions: Arc<SessionManager>,
+) {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message as TsMessage;
+
+    let mut backoff = 1u64;
+    let max_backoff = 30u64;
+
+    loop {
+        let control_url = format!("ws://{}:{}/control", host.ip, host.port);
+        info!(name = %host.name, url = %control_url, "connecting to paired host...");
+
+        let ws = match tokio_tungstenite::connect_async(&control_url).await {
+            Ok((ws, _)) => ws,
+            Err(e) => {
+                warn!(name = %host.name, error = %e, backoff = backoff, "connection failed, retrying");
+                tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+                backoff = (backoff * 2).min(max_backoff);
+                continue;
+            }
+        };
+
+        let (mut ws_tx, ws_rx) = ws.split();
+
+        // Authenticate with long-lived key.
+        let auth_msg = serde_json::json!({
+            "type": "auth",
+            "auth": host.key,
+            "name": "hermytt",
+            "role": "controller"
+        });
+        if ws_tx.send(TsMessage::Text(auth_msg.to_string().into())).await.is_err() {
+            warn!(name = %host.name, "auth send failed");
+            tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+            backoff = (backoff * 2).min(max_backoff);
+            continue;
+        }
+
+        // Reassemble for the control loop.
+        let ws = ws_rx.reunite(ws_tx).unwrap();
+
+        info!(name = %host.name, "paired host connected");
+        backoff = 1; // reset on success
+
+        run_outbound_control(ws, host.name.clone(), control_hub.clone(), registry.clone()).await;
+
+        warn!(name = %host.name, "paired host disconnected, reconnecting in {}s", backoff);
+        tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+        backoff = (backoff * 2).min(max_backoff);
+    }
+}
+
+/// Spawn reconnect loops for all paired hosts from the keys file.
+pub fn spawn_paired_host_connections(
+    keys_path: &std::path::Path,
+    auth_token: Option<String>,
+    control_hub: Arc<hermytt_core::ControlHub>,
+    registry: Arc<ServiceRegistry>,
+    sessions: Arc<SessionManager>,
+) {
+    let hosts = hermytt_core::pairing::PairedHosts::load(keys_path);
+    for (name, host) in hosts.hosts {
+        info!(name = %name, ip = %host.ip, "spawning reconnect loop for paired host");
+        let auth = auth_token.clone();
+        let hub = control_hub.clone();
+        let reg = registry.clone();
+        let sess = sessions.clone();
+        tokio::spawn(async move {
+            connect_paired_host(host, auth, hub, reg, sess).await;
+        });
+    }
 }
 

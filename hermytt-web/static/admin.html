@@ -330,12 +330,17 @@ document.getElementById('btn-new-session').addEventListener('click', async () =>
   document.getElementById('modal-bg').classList.add('active');
   document.getElementById('modal-save').onclick = async () => {
     const host = document.getElementById('host-select').value;
+    console.log('[hermytt] spawn on host:', JSON.stringify(host));
     closeModal();
     if (!host) {
       await fetch('/session', { method: 'POST', headers: authHeaders() });
     } else {
-      const res = await fetch('/hosts/' + encodeURIComponent(host) + '/spawn', { method: 'POST', headers: authHeaders(), body: JSON.stringify({shell: '/bin/bash'}) });
-      if (!res.ok) { const d = await res.json(); banner(d.error || 'spawn failed', 'err'); }
+      const url = '/hosts/' + encodeURIComponent(host) + '/spawn';
+      console.log('[hermytt] spawn url:', url);
+      const res = await fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify({shell: '/bin/bash'}) });
+      const data = await res.json();
+      console.log('[hermytt] spawn response:', JSON.stringify(data));
+      if (!res.ok) { banner(data.error || 'spawn failed', 'err'); }
     }
     refreshSessions();
   };
