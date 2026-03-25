@@ -129,7 +129,7 @@ Hermytt is the patriarch of an ecosystem of composable tools:
 | [prytty](https://github.com/yttfam/prytty) | WASM syntax highlighter (75KB) |
 | [fytti](https://github.com/yttfam/fytti) | GPU-accelerated WASM app runtime |
 | [wytti](https://github.com/yttfam/wytti) | WASI sandbox runtime |
-| [hermytt-bots](https://github.com/yttfam/hermytt-bots) | Chat bot bridges (Telegram, Signal, Discord) |
+|
 
 ### Service registry
 
