@@ -464,7 +464,8 @@ document.getElementById('modal-bg').addEventListener('click', (e) => { if (e.tar
 
 document.getElementById('btn-save-transports').addEventListener('click', async () => {
   if (!dirty) return;
-  const res = await fetch('/config', { method:'PUT', headers:authHeaders(), body:JSON.stringify(config) });
+  const payload = Object.fromEntries(Object.entries(config).filter(([k]) => k !== 'auth'));
+  const res = await fetch('/config', { method:'PUT', headers:authHeaders(), body:JSON.stringify(payload) });
   const data = await res.json();
   if (!res.ok) { banner(data.error||'save failed','err'); return; }
   dirty = false; renderTransports();

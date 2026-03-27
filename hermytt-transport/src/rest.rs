@@ -299,9 +299,22 @@ async fn save_config(
         return Err((StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "no config file"}))));
     };
 
-    // Reject changes to auth section (prevent token lockout).
-    if body.get("auth").is_some() {
-        return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "cannot modify [auth] via API"}))));
+    // Strip auth from input (prevent token lockout) and preserve existing auth.
+    let mut body = body;
+    body.as_object_mut().map(|o| o.remove("auth"));
+
+    // Read existing config to preserve [auth].
+    let existing_auth = tokio::fs::read_to_string(path)
+        .await
+        .ok()
+        .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
+        .and_then(|v| {
+            serde_json::to_value(&v)
+                .ok()
+                .and_then(|j| j.get("auth").cloned())
+        });
+    if let Some(auth) = existing_auth {
+        body.as_object_mut().map(|o| o.insert("auth".into(), auth));
     }
 
     // Validate required fields per transport.
