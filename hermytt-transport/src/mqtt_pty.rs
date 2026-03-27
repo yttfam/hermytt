@@ -27,7 +27,7 @@ fn parse_pty_input_topic(topic: &str) -> Option<&str> {
         return None;
     }
     let session_id = parts[1];
-    if session_id == "default" || session_id.chars().all(|c| c.is_ascii_alphanumeric()) {
+    if session_id == "default" || session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         Some(session_id)
     } else {
         None
@@ -190,6 +190,11 @@ mod tests {
     #[test]
     fn parse_valid_pty_topic() {
         assert_eq!(parse_pty_input_topic("hermytt/abc123/pty/in"), Some("abc123"));
+    }
+
+    #[test]
+    fn parse_shytti_session_id() {
+        assert_eq!(parse_pty_input_topic("hermytt/12437-69c6a5cb-3/pty/in"), Some("12437-69c6a5cb-3"));
     }
 
     #[test]
