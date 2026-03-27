@@ -139,8 +139,6 @@ impl Transport for RestTransport {
             .route("/hosts", get(list_hosts))
             .route("/hosts/{name}/spawn", post(spawn_on_host))
             .route("/hosts/pair", post(pair_host))
-            // Bootstrap scripts for family members.
-            .route("/bootstrap/shytti", get(bootstrap_shytti))
             // Internal session API (for Shytti and external orchestrators).
             .route("/internal/session", post(register_managed_session))
             .route("/internal/session/{id}", axum::routing::delete(unregister_managed_session))
@@ -148,6 +146,10 @@ impl Transport for RestTransport {
                 state.clone(),
                 auth_middleware,
             ));
+
+        // Public routes (no auth required).
+        let public_routes = Router::new()
+            .route("/bootstrap/shytti", get(bootstrap_shytti));
 
         // WebSocket: auth via first message, not query param.
         let ws_routes = Router::new()
@@ -161,7 +163,7 @@ impl Transport for RestTransport {
             .allow_headers(Any)
             .allow_methods(Any);
 
-        let mut app = api.merge(ws_routes).with_state(state).layer(cors);
+        let mut app = api.merge(ws_routes).merge(public_routes).with_state(state).layer(cors);
 
         // Merge optional extra routes (e.g., web UI).
         if let Some(extra) = &self.extra_routes {
@@ -1007,8 +1009,12 @@ esac
 
 echo "platform: $OS/$ARCH"
 
+# Resolve latest shytti version
+VERSION=$(curl -fsSL -o /dev/null -w '%{{url_effective}}' https://github.com/yttfam/shytti/releases/latest | grep -oE '[^/]+$')
+echo "latest shytti: $VERSION"
+
 # Download shytti binary
-DOWNLOAD_URL="https://github.com/yttfam/shytti/releases/latest/download/shytti-$OS-$ARCH"
+DOWNLOAD_URL="https://github.com/yttfam/shytti/releases/download/$VERSION/shytti-$OS-$ARCH"
 echo "downloading shytti from $DOWNLOAD_URL..."
 sudo mkdir -p "$INSTALL_DIR"
 sudo curl -fSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/shytti" || {{
@@ -1039,8 +1045,16 @@ HERMYTT_KEY=$HERMYTT_KEY
 ENV
 sudo chmod 600 "$INSTALL_DIR/env"
 
+# Chown config to the invoking user (not root) so the daemon can read it
+RUN_USER="${{SUDO_USER:-$(whoami)}}"
+sudo chown "$RUN_USER" "$INSTALL_DIR" "$INSTALL_DIR/shytti.toml" "$INSTALL_DIR/env"
+
 # Install systemd service
 if command -v systemctl &> /dev/null; then
+    if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        echo "stopping existing shytti service..."
+        sudo systemctl stop "$SERVICE_NAME"
+    fi
     echo "installing systemd service..."
     sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << SVC
 [Unit]
@@ -1050,7 +1064,7 @@ After=network.target
 [Service]
 Type=simple
 User=$(whoami)
-ExecStart=$INSTALL_DIR/shytti daemon -c $INSTALL_DIR/shytti.toml
+ExecStart=$INSTALL_DIR/shytti serve -c $INSTALL_DIR/shytti.toml
 Restart=always
 RestartSec=2
 EnvironmentFile=$INSTALL_DIR/env
@@ -1073,9 +1087,65 @@ SVC
         echo "warning: service started but may have issues"
         echo "check:   sudo journalctl -u $SERVICE_NAME -e"
     fi
+elif [ "$OS" = "darwin" ]; then
+    PLIST_LABEL="com.yttfam.shytti"
+    PLIST_PATH="/Library/LaunchDaemons/$PLIST_LABEL.plist"
+    if sudo launchctl print system/$PLIST_LABEL &>/dev/null; then
+        echo "stopping existing shytti daemon..."
+        sudo launchctl bootout system/$PLIST_LABEL 2>/dev/null || true
+        sleep 1
+    fi
+    echo "installing launchd daemon..."
+    sudo tee "$PLIST_PATH" > /dev/null << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$PLIST_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$INSTALL_DIR/shytti</string>
+        <string>daemon</string>
+        <string>-c</string>
+        <string>$INSTALL_DIR/shytti.toml</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HERMYTT_URL</key>
+        <string>$HERMYTT_URL</string>
+        <key>HERMYTT_KEY</key>
+        <string>$HERMYTT_KEY</string>
+    </dict>
+    <key>UserName</key>
+    <string>$(whoami)</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>$INSTALL_DIR/shytti.log</string>
+    <key>StandardErrorPath</key>
+    <string>$INSTALL_DIR/shytti.log</string>
+</dict>
+</plist>
+PLIST
+    sudo chmod 644 "$PLIST_PATH"
+    sudo launchctl bootstrap system "$PLIST_PATH"
+    sleep 2
+    if sudo launchctl print system/$PLIST_LABEL &>/dev/null; then
+        echo ""
+        echo "=== shytti installed and running ==="
+        echo "service: sudo launchctl print system/$PLIST_LABEL"
+        echo "logs:    tail -f $INSTALL_DIR/shytti.log"
+        echo "config:  $INSTALL_DIR/shytti.toml"
+    else
+        echo "warning: daemon loaded but may have issues"
+        echo "check:   tail -50 $INSTALL_DIR/shytti.log"
+    fi
 else
     echo ""
-    echo "=== shytti installed (no systemd) ==="
+    echo "=== shytti installed (no service manager) ==="
     echo "run manually: $INSTALL_DIR/shytti serve -c $INSTALL_DIR/shytti.toml"
 fi
 "#, hermytt_url = hermytt_url, token = token);
