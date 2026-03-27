@@ -428,7 +428,11 @@ function renderTransports() {
     });
   });
   tbody.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openEditModal(b.dataset.edit)));
-  document.getElementById('btn-save-transports').style.opacity = dirty ? 1 : 0.3;
+  const saveBtn = document.getElementById('btn-save-transports');
+  saveBtn.style.opacity = dirty ? 1 : 0.3;
+  saveBtn.style.pointerEvents = dirty ? 'auto' : 'none';
+  if (dirty) { saveBtn.textContent = '● Save changes'; saveBtn.style.background = 'var(--accent)'; saveBtn.style.color = '#000'; }
+  else { saveBtn.textContent = 'Save'; saveBtn.style.background = ''; saveBtn.style.color = ''; }
 }
 
 function openEditModal(name) {
@@ -485,6 +489,8 @@ document.getElementById('btn-restart').addEventListener('click', async () => {
     catch(e) { if(n>30){clearInterval(poll);banner('server did not come back','err');} }
   }, 1000);
 });
+
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 // --- Boot ---
 function refreshAll() { refreshInfo(); refreshSessions(); refreshFamily(); }
