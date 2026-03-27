@@ -424,7 +424,7 @@ function renderTransports() {
         // Disable dependents.
         Object.entries(TRANSPORT_DEFS).forEach(([dn,dd])=>{ if(dd.requires===n && isEnabled(dn)) delete config.transport[dn]; });
       }
-      dirty = true; renderTransports();
+      dirty = true; renderTransports(); saveConfig();
     });
   });
   tbody.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openEditModal(b.dataset.edit)));
@@ -459,14 +459,14 @@ function openEditModal(name) {
     });
     if (!ok) return;
     if (!config.transport) config.transport = {};
-    config.transport[name] = u; dirty = true; closeModal(); renderTransports();
+    config.transport[name] = u; dirty = true; closeModal(); renderTransports(); saveConfig();
   };
 }
 function closeModal() { document.getElementById('modal-bg').classList.remove('active'); }
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.getElementById('modal-bg').addEventListener('click', (e) => { if (e.target.id==='modal-bg') closeModal(); });
 
-document.getElementById('btn-save-transports').addEventListener('click', async () => {
+async function saveConfig() {
   if (!dirty) return;
   const payload = Object.fromEntries(Object.entries(config).filter(([k]) => k !== 'auth'));
   const res = await fetch('/config', { method:'PUT', headers:authHeaders(), body:JSON.stringify(payload) });
@@ -475,7 +475,8 @@ document.getElementById('btn-save-transports').addEventListener('click', async (
   dirty = false; renderTransports();
   banner('saved — restart to apply','warn');
   document.getElementById('btn-restart').style.display = 'inline-block';
-});
+}
+document.getElementById('btn-save-transports').addEventListener('click', saveConfig);
 
 document.getElementById('btn-restart').addEventListener('click', async () => {
   if (!confirm('Restart hermytt? Active sessions will terminate.')) return;
