@@ -325,6 +325,9 @@ async fn save_config(
                 }
             }
         }
+        if transport.get("mqtt_pty").is_some() && transport.get("mqtt").is_none() {
+            return Err((StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "MQTT PTY requires [transport.mqtt]"}))));
+        }
     }
 
     // Convert JSON -> TOML and write.

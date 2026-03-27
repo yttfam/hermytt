@@ -62,7 +62,15 @@ pub struct TransportConfig {
     #[serde(default)]
     pub mqtt: Option<MqttConfig>,
     #[serde(default)]
+    pub mqtt_pty: Option<MqttPtyConfig>,
+    #[serde(default)]
     pub tcp: Option<TcpConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MqttPtyConfig {
+    #[serde(default = "default_mqtt_pty_buffer_ms")]
+    pub buffer_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -107,6 +115,9 @@ fn default_mqtt_port() -> u16 {
 fn default_tcp_port() -> u16 {
     7779
 }
+fn default_mqtt_pty_buffer_ms() -> u64 {
+    200
+}
 
 impl Config {
     pub fn from_str(s: &str) -> anyhow::Result<Self> {
@@ -130,6 +141,7 @@ impl Config {
             transport: TransportConfig {
                 rest: Some(RestConfig { port: 7777 }),
                 mqtt: None,
+                mqtt_pty: None,
                 tcp: None,
             },
         }

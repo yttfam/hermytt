@@ -7,6 +7,7 @@ use clap::{Parser, Subcommand};
 use hermytt_core::SessionManager;
 use hermytt_transport::Transport;
 use hermytt_transport::mqtt::MqttTransport;
+use hermytt_transport::mqtt_pty::MqttPtyTransport;
 use hermytt_transport::rest::RestTransport;
 use hermytt_transport::tcp::TcpTransport;
 use hermytt_transport::tls::TlsConfig;
@@ -192,6 +193,12 @@ async fn start_server(
             name: "MQTT".into(),
             endpoint: format!("{}:{}", m.broker, m.port),
         });
+        if config.transport.mqtt_pty.is_some() {
+            transport_info.push(hermytt_transport::rest::TransportInfo {
+                name: "MQTT PTY".into(),
+                endpoint: format!("{}:{}", m.broker, m.port),
+            });
+        }
     }
     if let Some(t) = &config.transport.tcp {
         transport_info.push(hermytt_transport::rest::TransportInfo {
@@ -229,18 +236,37 @@ async fn start_server(
 
 
     if let Some(mqtt_config) = &config.transport.mqtt {
+        // MQTT PTY streaming — uses same broker, separate connection.
+        if let Some(pty_config) = &config.transport.mqtt_pty {
+            let transport = Arc::new(MqttPtyTransport {
+                broker_host: mqtt_config.broker.clone(),
+                broker_port: mqtt_config.port,
+                username: mqtt_config.username.clone(),
+                password: mqtt_config.password.clone(),
+                buffer_ms: pty_config.buffer_ms,
+            });
+            let pty_sessions = sessions.clone();
+            tasks.push(tokio::spawn(async move {
+                if let Err(e) = transport.serve(pty_sessions).await {
+                    tracing::error!(transport = "mqtt-pty", error = %e, "transport failed");
+                }
+            }));
+        }
+
         let transport = Arc::new(MqttTransport {
             broker_host: mqtt_config.broker.clone(),
             broker_port: mqtt_config.port,
             username: mqtt_config.username.clone(),
             password: mqtt_config.password.clone(),
         });
-        let sessions = sessions.clone();
+        let mqtt_sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {
-            if let Err(e) = transport.serve(sessions).await {
+            if let Err(e) = transport.serve(mqtt_sessions).await {
                 tracing::error!(transport = "mqtt", error = %e, "transport failed");
             }
         }));
+    } else if config.transport.mqtt_pty.is_some() {
+        warn!("mqtt_pty requires [transport.mqtt] — ignoring");
     }
 
     if let Some(tcp_config) = &config.transport.tcp {

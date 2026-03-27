@@ -1,4 +1,5 @@
 pub mod mqtt;
+pub mod mqtt_pty;
 pub mod rest;
 pub mod tcp;
 pub mod tls;

@@ -375,6 +375,9 @@ const TRANSPORT_DEFS = {
     {key:'username',label:'User',type:'text'},
     {key:'password',label:'Pass',type:'password'},
   ]},
+  mqtt_pty: { label:'MQTT PTY', fields:[
+    {key:'buffer_ms',label:'Buffer (ms)',type:'number',default:200,hint:'output batching window — 0 for raw passthrough'},
+  ], requires:'mqtt' },
   tcp: { label:'TCP', fields:[{key:'port',label:'Port',type:'number',required:true,default:7779}] },
 };
 
@@ -396,7 +399,10 @@ function renderTransports() {
   tbody.innerHTML = Object.entries(TRANSPORT_DEFS).map(([name, def]) => {
     const on = isEnabled(name); const cfg = getTC(name);
     let ep = '-';
-    if (on) { if (cfg.port) ep=':'+cfg.port; else if (cfg.broker) ep=cfg.broker+':'+(cfg.port||1883); }
+    if (on) {
+      if (name==='mqtt_pty') { const mc=getTC('mqtt'); ep=mc.broker?mc.broker+':'+(mc.port||1883):'(via mqtt)'; }
+      else if (cfg.port) ep=':'+cfg.port; else if (cfg.broker) ep=cfg.broker+':'+(cfg.port||1883);
+    }
     return `<tr>
       <td><label class="toggle"><input type="checkbox" data-t="${esc(name)}" ${on?'checked':''}><span class="sl"></span></label></td>
       <td><span class="dot ${on?'dot-on':'dot-off'}"></span>${esc(def.label)}</td>
@@ -408,9 +414,16 @@ function renderTransports() {
   tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
     cb.addEventListener('change', () => {
       const n = cb.dataset.t;
+      const def = TRANSPORT_DEFS[n];
       if (!config.transport) config.transport = {};
-      if (cb.checked) { const d={}; TRANSPORT_DEFS[n].fields.forEach(f=>{if(f.default!=null)d[f.key]=f.default}); config.transport[n]=d; }
-      else delete config.transport[n];
+      if (cb.checked) {
+        if (def.requires && !isEnabled(def.requires)) { cb.checked = false; banner(def.label + ' requires ' + TRANSPORT_DEFS[def.requires].label, 'err'); setTimeout(()=>document.getElementById('banner-area').className='banner',3000); return; }
+        const d={}; def.fields.forEach(f=>{if(f.default!=null)d[f.key]=f.default}); config.transport[n]=d;
+      } else {
+        delete config.transport[n];
+        // Disable dependents.
+        Object.entries(TRANSPORT_DEFS).forEach(([dn,dd])=>{ if(dd.requires===n && isEnabled(dn)) delete config.transport[dn]; });
+      }
       dirty = true; renderTransports();
     });
   });
