@@ -654,18 +654,26 @@ async function addParserSession(name) {
 
 async function editParserSession(name, sessionId) {
   const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  // Fetch current session config
-  const res = await fetch(`${proxy}/sessions`, { headers: authHeaders() }).catch(() => null);
+  // Fetch current session config + hermytt sessions in parallel
+  const [gryttiRes, hermyttRes] = await Promise.all([
+    fetch(`${proxy}/sessions`, { headers: authHeaders() }).catch(() => null),
+    fetch('/sessions', { headers: authHeaders() }),
+  ]);
   let session = {};
-  if (res?.ok) {
-    const data = await res.json();
+  if (gryttiRes?.ok) {
+    const data = await gryttiRes.json();
     session = (data.sessions || []).find(s => s.session_id === sessionId) || {};
   }
+  const hermyttSessions = (await hermyttRes.json()).sessions || [];
 
   document.getElementById('modal-title').textContent = `Edit — ${sessionId.slice(0,12)}`;
   const fields = document.getElementById('modal-fields');
   fields.innerHTML = `
-    <div class="field"><label>Session ID</label><div style="font-size:13px;color:var(--text-dim)">${esc(sessionId)}</div></div>
+    <div class="field"><label>Session</label><select id="edit-session-id">
+      ${hermyttSessions.map(s =>
+        `<option value="${esc(s.id)}" ${s.id === sessionId ? 'selected' : ''}>${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`
+      ).join('')}
+    </select></div>
     <div class="field"><label>Telegram bot token</label><input type="text" id="edit-bot-token" value="${esc(session.bot_token || '')}" placeholder="123456:ABC-DEF..."></div>
     <div class="field"><label>Debounce (ms): <span id="edit-debounce-val">${session.debounce_ms || 200}</span></label>
       <input type="range" id="edit-debounce" min="50" max="2000" step="50" value="${session.debounce_ms || 200}" oninput="document.getElementById('edit-debounce-val').textContent=this.value">
@@ -674,7 +682,10 @@ async function editParserSession(name, sessionId) {
   document.getElementById('modal-bg').classList.add('active');
   document.getElementById('modal-save').style.display = '';
   document.getElementById('modal-save').onclick = async () => {
-    const update = { debounce_ms: parseInt(document.getElementById('edit-debounce').value) };
+    const update = {
+      session_id: document.getElementById('edit-session-id').value,
+      debounce_ms: parseInt(document.getElementById('edit-debounce').value),
+    };
     const token = document.getElementById('edit-bot-token').value.trim();
     if (token) update.bot_token = token;
     const r = await fetch(`${proxy}/sessions/${encodeURIComponent(sessionId)}`, {
