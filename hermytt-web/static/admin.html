@@ -238,8 +238,7 @@ async function refreshFamily() {
     tbody.innerHTML = services.map(s => {
       const on = s.status === 'connected';
       const dotCls = on ? 'dot-on' : 'dot-off';
-      const roleMap = { Shell:'shell', Renderer:'renderer', Highlighter:'highlighter', Sandbox:'sandbox', Bot:'bot', Parser:'parser' };
-      const role = roleMap[s.role] || 'shell';
+      const role = (s.role || 'shell').toLowerCase();
       const configurable = on && s.endpoint.startsWith('http');
       const rowCls = configurable ? 'svc-configurable' : '';
       const click = configurable ? `onclick="openServicePanel('${esc(s.name)}')"` : '';
@@ -536,8 +535,7 @@ async function openServicePanel(name) {
   const svc = (regData.services || []).find(s => s.name === name);
   if (!svc) return banner('service not found', 'err');
 
-  const roleMap = { Shell:'shell', Renderer:'renderer', Highlighter:'highlighter', Sandbox:'sandbox', Bot:'bot', Parser:'parser' };
-  const role = roleMap[svc.role] || 'unknown';
+  const role = (svc.role || 'unknown').toLowerCase();
   const def = SERVICE_PANEL_DEFS[role];
 
   // Fetch status, config, and sessions in parallel via proxy
