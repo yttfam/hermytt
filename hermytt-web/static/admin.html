@@ -506,145 +506,200 @@ document.getElementById('btn-restart').addEventListener('click', async () => {
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 // --- Service config panel ---
-const SERVICE_PANEL_DEFS = {
-  parser: {
-    label: 'PTY Parser',
-    fields: [
-      { key: 'session_id', label: 'Session', type: 'session-picker' },
-      { key: 'debounce_ms', label: 'Debounce (ms)', type: 'range', min: 50, max: 2000, step: 50 },
-    ],
-    readOnly: [
-      { key: 'telegram_connected', label: 'Telegram', type: 'bool' },
-      { key: 'mqtt_host', label: 'MQTT Host' },
-    ],
-    statusFields: [
-      { key: 'claude_state', label: 'Claude', type: 'state-indicator' },
-      { key: 'messages_processed', label: 'Messages' },
-      { key: 'uptime', label: 'Uptime' },
-    ],
-    actions: [
-      { key: 'send', label: 'Send to stdin', endpoint: '/session/send', bodyKey: 'text', type: 'text-action' },
-    ],
-  },
-};
 
 async function openServicePanel(name) {
-  // Find service info from last registry fetch
   const regRes = await fetch('/registry', { headers: authHeaders() });
   const regData = await regRes.json();
   const svc = (regData.services || []).find(s => s.name === name);
   if (!svc) return banner('service not found', 'err');
 
   const role = (svc.role || 'unknown').toLowerCase();
-  const def = SERVICE_PANEL_DEFS[role];
+  if (role === 'parser') return openParserPanel(name);
 
-  // Fetch status, config, and sessions in parallel via proxy
+  // Generic fallback: raw JSON
   const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  const [statusRes, configRes, sessionsRes] = await Promise.all([
+  const [statusRes, configRes] = await Promise.all([
     fetch(`${proxy}/status`, { headers: authHeaders() }).catch(() => null),
     fetch(`${proxy}/config`, { headers: authHeaders() }).catch(() => null),
-    fetch('/sessions', { headers: authHeaders() }),
   ]);
-
   const status = statusRes?.ok ? await statusRes.json() : {};
   const svcConfig = configRes?.ok ? await configRes.json() : {};
-  const sessions = (await sessionsRes.json()).sessions || [];
+  document.getElementById('modal-title').textContent = name;
+  document.getElementById('modal-fields').innerHTML =
+    `<div class="field"><label>Status</label><pre style="font-size:11px;color:var(--text-dim);white-space:pre-wrap">${esc(JSON.stringify(status, null, 2))}</pre></div>
+     <div class="field"><label>Config</label><pre style="font-size:11px;color:var(--text-dim);white-space:pre-wrap">${esc(JSON.stringify(svcConfig, null, 2))}</pre></div>`;
+  document.getElementById('modal-bg').classList.add('active');
+  document.getElementById('modal-save').style.display = 'none';
+}
 
-  document.getElementById('modal-title').textContent = def ? def.label + ' — ' + name : name;
-  const fields = document.getElementById('modal-fields');
+async function openParserPanel(name) {
+  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
 
-  if (!def) {
-    // Generic: show raw JSON
-    fields.innerHTML = `<div class="field"><label>Status</label><pre style="font-size:11px;color:var(--text-dim);white-space:pre-wrap">${esc(JSON.stringify(status, null, 2))}</pre></div>
-      <div class="field"><label>Config</label><pre style="font-size:11px;color:var(--text-dim);white-space:pre-wrap">${esc(JSON.stringify(svcConfig, null, 2))}</pre></div>`;
-    document.getElementById('modal-bg').classList.add('active');
-    document.getElementById('modal-save').style.display = 'none';
-    return;
+  // Try multi-session endpoint first, fall back to single-session
+  const [gryttiSessionsRes, hermyttSessionsRes, statusRes] = await Promise.all([
+    fetch(`${proxy}/sessions`, { headers: authHeaders() }).catch(() => null),
+    fetch('/sessions', { headers: authHeaders() }),
+    fetch(`${proxy}/status`, { headers: authHeaders() }).catch(() => null),
+  ]);
+
+  const hermyttSessions = (await hermyttSessionsRes.json()).sessions || [];
+  const status = statusRes?.ok ? await statusRes.json() : {};
+  let gryttiSessions = [];
+  let multiMode = false;
+
+  if (gryttiSessionsRes?.ok) {
+    const data = await gryttiSessionsRes.json();
+    gryttiSessions = data.sessions || [];
+    multiMode = true;
+  } else {
+    // Fallback: single-session from /config
+    const configRes = await fetch(`${proxy}/config`, { headers: authHeaders() }).catch(() => null);
+    const cfg = configRes?.ok ? await configRes.json() : {};
+    if (cfg.session_id) {
+      gryttiSessions = [{
+        session_id: cfg.session_id,
+        claude_state: status.claude_state || 'unknown',
+        telegram_connected: cfg.telegram_connected || false,
+        telegram_chat_id: status.telegram_chat_id || null,
+        messages_processed: status.messages_processed || 0,
+        debounce_ms: cfg.debounce_ms || 200,
+      }];
+    }
   }
+
+  document.getElementById('modal-title').textContent = 'grytti — PTY Parser';
+  const fields = document.getElementById('modal-fields');
 
   let html = '';
 
-  // Status fields
-  if (def.statusFields) {
-    html += '<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">';
-    for (const f of def.statusFields) {
-      const v = status[f.key] ?? svcConfig[f.key] ?? '-';
-      if (f.type === 'state-indicator') {
-        const cls = String(v).toLowerCase().replace(/[^a-z_]/g,'');
-        html += `<div><label style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px">${esc(f.label)}</label><div class="svc-status ${cls}">\u25cf ${esc(String(v))}</div></div>`;
-      } else {
-        html += `<div><label style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px">${esc(f.label)}</label><div style="font-size:13px">${esc(String(v))}</div></div>`;
-      }
+  // Global status bar
+  html += `<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap;font-size:12px;color:var(--text-dim)">`;
+  html += `<div>uptime: ${esc(String(status.uptime_secs ? Math.floor(status.uptime_secs/60)+'m' : status.uptime || '-'))}</div>`;
+  html += `<div>MQTT: ${esc(status.mqtt_host || '-')}</div>`;
+  html += `</div>`;
+
+  // Sessions table
+  if (gryttiSessions.length) {
+    html += `<table style="width:100%;font-size:12px;margin-bottom:12px">
+      <thead><tr><th></th><th>session</th><th>claude</th><th>telegram</th><th>msgs</th><th></th></tr></thead><tbody>`;
+    for (const gs of gryttiSessions) {
+      const cls = String(gs.claude_state || 'unknown').toLowerCase().replace(/[^a-z_]/g,'');
+      const tgDot = gs.telegram_connected ? 'dot-on' : 'dot-off';
+      const tgLabel = gs.telegram_chat_id ? `chat ${gs.telegram_chat_id}` : 'not connected';
+      html += `<tr>
+        <td><span class="dot ${gs.telegram_connected?'dot-on':'dot-off'}"></span></td>
+        <td>${esc(gs.session_id.slice(0,12))}</td>
+        <td><span class="svc-status ${cls}">\u25cf ${esc(cls)}</span></td>
+        <td><span class="dot ${tgDot}"></span> ${esc(tgLabel)}</td>
+        <td>${gs.messages_processed || 0}</td>
+        <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end">
+          <button class="btn" onclick="editParserSession('${esc(name)}','${esc(gs.session_id)}')">edit</button>
+          ${multiMode ? `<button class="btn btn-red" onclick="deleteParserSession('${esc(name)}','${esc(gs.session_id)}')">rm</button>` : ''}
+        </td>
+      </tr>`;
     }
-    html += '</div>';
+    html += `</tbody></table>`;
+  } else {
+    html += `<div style="color:var(--text-muted);font-size:12px;margin-bottom:12px">no sessions configured</div>`;
   }
 
-  // Editable fields
-  for (const f of def.fields) {
-    const v = svcConfig[f.key] ?? '';
-    if (f.type === 'session-picker') {
-      html += `<div class="field"><label>${esc(f.label)}</label><select data-key="${esc(f.key)}">`;
-      html += `<option value="">— select —</option>`;
-      for (const s of sessions) {
-        const sel = s.id === v ? 'selected' : '';
-        html += `<option value="${esc(s.id)}" ${sel}>${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`;
-      }
-      html += `</select></div>`;
-    } else if (f.type === 'range') {
-      html += `<div class="field"><label>${esc(f.label)}: <span id="rv-${f.key}">${v}</span></label><input type="range" data-key="${esc(f.key)}" min="${f.min}" max="${f.max}" step="${f.step}" value="${v}" oninput="document.getElementById('rv-${f.key}').textContent=this.value"></div>`;
-    } else {
-      html += `<div class="field"><label>${esc(f.label)}</label><input type="text" data-key="${esc(f.key)}" value="${esc(String(v))}"></div>`;
-    }
-  }
+  // Add session button
+  html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px">
+    <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Add session</div>
+    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:140px"><label style="font-size:10px;color:var(--text-dim)">Session</label><select id="grytti-add-session">
+        <option value="">— pick —</option>
+        ${hermyttSessions.filter(s => !gryttiSessions.find(g => g.session_id === s.id)).map(s =>
+          `<option value="${esc(s.id)}">${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`
+        ).join('')}
+      </select></div>
+      <div style="flex:1;min-width:200px"><label style="font-size:10px;color:var(--text-dim)">Telegram bot token</label><input type="text" id="grytti-add-token" placeholder="123456:ABC-DEF..."></div>
+      <button class="btn" onclick="addParserSession('${esc(name)}')">add</button>
+    </div>
+  </div>`;
 
-  // Read-only fields
-  if (def.readOnly) {
-    for (const f of def.readOnly) {
-      const v = svcConfig[f.key] ?? status[f.key] ?? '-';
-      if (f.type === 'bool') {
-        html += `<div class="field"><label>${esc(f.label)}</label><div><span class="dot ${v ? 'dot-on' : 'dot-off'}"></span> ${v ? 'connected' : 'disconnected'}</div></div>`;
-      } else {
-        html += `<div class="field"><label>${esc(f.label)}</label><div style="color:var(--text-dim);font-size:13px">${esc(String(v))}</div></div>`;
-      }
-    }
-  }
-
-  // Actions
-  if (def.actions) {
-    for (const a of def.actions) {
-      if (a.type === 'text-action') {
-        html += `<div class="field" style="display:flex;gap:8px;align-items:end"><div style="flex:1"><label>${esc(a.label)}</label><input type="text" id="svc-action-${a.key}" placeholder="type and press send"></div><button class="btn" onclick="svcAction('${esc(name)}','${esc(a.endpoint)}','${esc(a.bodyKey)}','svc-action-${a.key}')">send</button></div>`;
-      }
-    }
-  }
+  // Send stdin
+  html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+    <div style="display:flex;gap:8px;align-items:end">
+      <div style="flex:1"><label style="font-size:10px;color:var(--text-dim)">Send to stdin</label>
+        <div style="display:flex;gap:4px">
+          <select id="grytti-send-session" style="width:140px">
+            ${gryttiSessions.map(s => `<option value="${esc(s.session_id)}">${esc(s.session_id.slice(0,12))}</option>`).join('')}
+          </select>
+          <input type="text" id="grytti-send-text" placeholder="type command..." style="flex:1">
+        </div>
+      </div>
+      <button class="btn" onclick="parserSendStdin('${esc(name)}')">send</button>
+    </div>
+  </div>`;
 
   fields.innerHTML = html;
   document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').style.display = '';
+  document.getElementById('modal-save').style.display = 'none';
+}
 
+async function addParserSession(name) {
+  const sid = document.getElementById('grytti-add-session').value;
+  const token = document.getElementById('grytti-add-token').value.trim();
+  if (!sid) return banner('pick a session', 'err');
+  if (!token) return banner('bot token required', 'err');
+  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
+  const res = await fetch(`${proxy}/sessions`, {
+    method: 'POST', headers: authHeaders(),
+    body: JSON.stringify({ session_id: sid, bot_token: token, debounce_ms: 200 })
+  });
+  if (res.ok) { closeModal(); banner('session added', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); openParserPanel(name); }
+  else { const d = await res.json().catch(() => ({})); banner(d.error || 'failed', 'err'); }
+}
+
+async function editParserSession(name, sessionId) {
+  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
+  // Fetch current session config
+  const res = await fetch(`${proxy}/sessions`, { headers: authHeaders() }).catch(() => null);
+  let session = {};
+  if (res?.ok) {
+    const data = await res.json();
+    session = (data.sessions || []).find(s => s.session_id === sessionId) || {};
+  }
+
+  document.getElementById('modal-title').textContent = `Edit — ${sessionId.slice(0,12)}`;
+  const fields = document.getElementById('modal-fields');
+  fields.innerHTML = `
+    <div class="field"><label>Session ID</label><div style="font-size:13px;color:var(--text-dim)">${esc(sessionId)}</div></div>
+    <div class="field"><label>Telegram bot token</label><input type="text" id="edit-bot-token" value="${esc(session.bot_token || '')}" placeholder="123456:ABC-DEF..."></div>
+    <div class="field"><label>Debounce (ms): <span id="edit-debounce-val">${session.debounce_ms || 200}</span></label>
+      <input type="range" id="edit-debounce" min="50" max="2000" step="50" value="${session.debounce_ms || 200}" oninput="document.getElementById('edit-debounce-val').textContent=this.value">
+    </div>`;
+
+  document.getElementById('modal-bg').classList.add('active');
+  document.getElementById('modal-save').style.display = '';
   document.getElementById('modal-save').onclick = async () => {
-    const update = {};
-    fields.querySelectorAll('[data-key]').forEach(el => {
-      const k = el.dataset.key;
-      const fd = def.fields.find(f => f.key === k);
-      if (!fd) return;
-      let v = el.value;
-      if (fd.type === 'range') v = parseInt(v);
-      if (v !== '' && v !== null) update[k] = v;
+    const update = { debounce_ms: parseInt(document.getElementById('edit-debounce').value) };
+    const token = document.getElementById('edit-bot-token').value.trim();
+    if (token) update.bot_token = token;
+    const r = await fetch(`${proxy}/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PUT', headers: authHeaders(), body: JSON.stringify(update)
     });
-    const res = await fetch(`${proxy}/config`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(update) });
-    if (res.ok) { closeModal(); banner('config updated', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); }
-    else { const d = await res.json().catch(() => ({})); banner(d.error || 'update failed', 'err'); }
+    if (r.ok) { closeModal(); banner('updated', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); openParserPanel(name); }
+    else { const d = await r.json().catch(() => ({})); banner(d.error || 'failed', 'err'); }
   };
 }
 
-async function svcAction(name, endpoint, bodyKey, inputId) {
-  const input = document.getElementById(inputId);
-  const text = input.value.trim();
+async function deleteParserSession(name, sessionId) {
+  if (!confirm(`Remove session ${sessionId.slice(0,12)}? This disconnects the Telegram bot.`)) return;
+  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
+  const res = await fetch(`${proxy}/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: authHeaders() });
+  if (res.ok) { banner('removed', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); openParserPanel(name); }
+  else { banner('failed', 'err'); }
+}
+
+async function parserSendStdin(name) {
+  const sid = document.getElementById('grytti-send-session').value;
+  const text = document.getElementById('grytti-send-text').value.trim();
   if (!text) return;
   const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  const res = await fetch(`${proxy}${endpoint}`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ [bodyKey]: text }) });
-  if (res.ok) { input.value = ''; banner('sent', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 2000); }
+  const res = await fetch(`${proxy}/session/send`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ session_id: sid, text }) });
+  if (res.ok) { document.getElementById('grytti-send-text').value = ''; banner('sent', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 2000); }
   else { banner('send failed', 'err'); }
 }
 
