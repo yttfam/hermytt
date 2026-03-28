@@ -1812,6 +1812,21 @@ pub async fn connect_paired_host(
             continue;
         }
 
+        // Read and discard auth response before entering control loop.
+        let mut ws_rx = ws_rx;
+        match ws_rx.next().await {
+            Some(Ok(TsMessage::Text(resp))) => {
+                tracing::debug!(name = %host.name, resp = %resp, "auth response");
+            }
+            Some(Ok(TsMessage::Close(_))) | None => {
+                warn!(name = %host.name, "connection closed during auth");
+                tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+                backoff = (backoff * 2).min(max_backoff);
+                continue;
+            }
+            _ => {}
+        }
+
         // Reassemble for the control loop.
         let ws = ws_rx.reunite(ws_tx).unwrap();
 
