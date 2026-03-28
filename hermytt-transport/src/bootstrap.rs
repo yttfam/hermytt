@@ -68,7 +68,7 @@ url = "$HERMYTT_URL"
 token = "$HERMYTT_KEY"
 
 [shell]
-default = "${{SHELL:-/bin/bash}}"
+default = "$(command -v zsh || command -v bash || echo /bin/sh)"
 CONF
 sudo chmod 600 "$INSTALL_DIR/shytti.toml"
 
