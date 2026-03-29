@@ -615,7 +615,7 @@ async function openParserPanel(name) {
           `<option value="${esc(s.id)}">${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`
         ).join('')}
       </select></div>
-      <div style="flex:1;min-width:200px"><label style="font-size:10px;color:var(--text-dim)">Telegram bot token</label><input type="text" id="grytti-add-token" placeholder="123456:ABC-DEF..."></div>
+      <div style="flex:1;min-width:200px"><label style="font-size:10px;color:var(--text-dim)">Telegram bot token <span style="color:var(--text-muted)">(unique per session)</span></label><input type="text" id="grytti-add-token" placeholder="123456:ABC-DEF..."></div>
       <button class="btn" onclick="addParserSession('${esc(name)}')">add</button>
     </div>
   </div>`;

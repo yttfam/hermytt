@@ -15,11 +15,43 @@ export class Terminal {
         wasm.__wbg_terminal_free(ptr, 0);
     }
     /**
+     * Toggle cursor blink phase. Call from a JS setInterval(~530ms).
+     */
+    blinkCursor() {
+        wasm.terminal_blinkCursor(this.__wbg_ptr);
+    }
+    /**
+     * Clear selection.
+     */
+    clearSelection() {
+        wasm.terminal_clearSelection(this.__wbg_ptr);
+    }
+    /**
      * @returns {number}
      */
     get cols() {
         const ret = wasm.terminal_cols(this.__wbg_ptr);
         return ret >>> 0;
+    }
+    /**
+     * Copy selection to clipboard. Call from JS.
+     * @returns {string | undefined}
+     */
+    copySelection() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.terminal_copySelection(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            let v1;
+            if (r0 !== 0) {
+                v1 = getStringFromWasm0(r0, r1).slice();
+                wasm.__wbindgen_export4(r0, r1 * 1, 1);
+            }
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Dump the grid content as text lines (for debugging).
@@ -45,6 +77,48 @@ export class Terminal {
         wasm.terminal_fit(this.__wbg_ptr);
     }
     /**
+     * Get the selected text content.
+     * @returns {string | undefined}
+     */
+    getSelection() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.terminal_getSelection(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            let v1;
+            if (r0 !== 0) {
+                v1 = getStringFromWasm0(r0, r1).slice();
+                wasm.__wbindgen_export4(r0, r1 * 1, 1);
+            }
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * Get the URL at pixel position (x, y), if any.
+     * @param {number} x
+     * @param {number} y
+     * @returns {string | undefined}
+     */
+    getUrlAt(x, y) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.terminal_getUrlAt(retptr, this.__wbg_ptr, x, y);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            let v1;
+            if (r0 !== 0) {
+                v1 = getStringFromWasm0(r0, r1).slice();
+                wasm.__wbindgen_export4(r0, r1 * 1, 1);
+            }
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
      * Handle a keyboard event. Returns escape sequence or null.
      * @param {KeyboardEvent} event
      * @returns {string | undefined}
@@ -67,11 +141,41 @@ export class Terminal {
         }
     }
     /**
+     * Whether there's an active selection.
+     * @returns {boolean}
+     */
+    get hasSelection() {
+        const ret = wasm.terminal_hasSelection(this.__wbg_ptr);
+        return ret !== 0;
+    }
+    /**
      * @returns {boolean}
      */
     get isScrolled() {
         const ret = wasm.terminal_isScrolled(this.__wbg_ptr);
         return ret !== 0;
+    }
+    /**
+     * Handle mousedown — start selection.
+     * @param {number} x
+     * @param {number} y
+     */
+    mouseDown(x, y) {
+        wasm.terminal_mouseDown(this.__wbg_ptr, x, y);
+    }
+    /**
+     * Handle mousemove while button held — extend selection.
+     * @param {number} x
+     * @param {number} y
+     */
+    mouseMove(x, y) {
+        wasm.terminal_mouseMove(this.__wbg_ptr, x, y);
+    }
+    /**
+     * Handle mouseup — finalize selection.
+     */
+    mouseUp() {
+        wasm.terminal_mouseUp(this.__wbg_ptr);
     }
     /**
      * Whether the terminal has pending changes to render.
@@ -147,6 +251,29 @@ export class Terminal {
      */
     scrollUp(lines) {
         wasm.terminal_scrollUp(this.__wbg_ptr, lines);
+    }
+    /**
+     * Search grid + scrollback for text. Returns JSON array of matches.
+     * @param {string} needle
+     * @returns {string}
+     */
+    search(needle) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(needle, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.terminal_search(retptr, this.__wbg_ptr, ptr0, len0);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred2_0 = r0;
+            deferred2_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export4(deferred2_0, deferred2_1, 1);
+        }
     }
     /**
      * Write PTY output data to the terminal. Does NOT render —
