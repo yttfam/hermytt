@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use hermytt_core::SessionManager;
+use hermytt_core::{ControlHub, SessionManager};
 use hermytt_transport::Transport;
 use hermytt_transport::rest::{RestTransport, TransportInfo};
 
@@ -398,4 +398,250 @@ async fn proxy_502_for_unreachable_service() {
     let res = auth(client().get(format!("{}/registry/dead-svc/proxy/status", base)))
         .send().await.unwrap();
     assert_eq!(res.status(), 502, "unreachable service endpoint should return 502");
+}
+
+// ============================================================
+// Bug: recovered sessions had no data plane (stdin worked, no output)
+// Fix: shytti v0.1.12 re-attaches data relay on reconnect
+// hermytt side: stdin forwarder spawned on shells_list recovery
+//
+// This test simulates a mock shytti connecting via /control WS,
+// responding to list_shells with an active shell, and verifying
+// that data flows bidirectionally on the recovered session.
+// ============================================================
+
+/// Start server and return (base_url, sessions, port) for WS tests.
+async fn start_server_with_ws() -> (String, Arc<SessionManager>, u16) {
+    let sessions = Arc::new(SessionManager::new("/bin/sh", 100));
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    let control_hub = ControlHub::new();
+    let registry = Arc::new(hermytt_core::ServiceRegistry::new());
+
+    let transport = Arc::new(RestTransport {
+        port,
+        bind: "127.0.0.1".to_string(),
+        auth_token: Some(TOKEN.to_string()),
+        shell: "/bin/sh".to_string(),
+        transport_info: vec![],
+        config_path: None,
+        tls: None,
+        recording_dir: None,
+        files_dir: None,
+        max_upload_size: 10 * 1024 * 1024,
+        extra_routes: None,
+        control_hub: Some(control_hub),
+        registry: Some(registry),
+    });
+
+    let sessions_clone = sessions.clone();
+    tokio::spawn(async move {
+        transport.serve(sessions_clone).await.unwrap();
+    });
+
+    let base = format!("http://127.0.0.1:{}", port);
+    for _ in 0..50 {
+        if reqwest::get(&base).await.is_ok() {
+            return (base, sessions, port);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("server didn't start");
+}
+
+#[tokio::test]
+async fn mock_shytti_control_ws_auth_and_heartbeat() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (_base, _sessions, port) = start_server_with_ws().await;
+    let url = format!("ws://127.0.0.1:{}/control", port);
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+    // Send auth.
+    let auth_msg = serde_json::json!({
+        "type": "auth",
+        "auth": TOKEN,
+        "name": "mock-shytti",
+        "role": "shell"
+    });
+    ws.send(Message::Text(auth_msg.to_string().into())).await.unwrap();
+
+    // Read auth response.
+    let resp = ws.next().await.unwrap().unwrap();
+    let text = match resp { Message::Text(t) => t.to_string(), _ => panic!("expected text") };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["status"], "ok");
+
+    // Send heartbeat.
+    let hb = serde_json::json!({"type":"heartbeat","meta":{"host":"test-host","shells_active":0}});
+    ws.send(Message::Text(hb.to_string().into())).await.unwrap();
+
+    // Should receive list_shells after first heartbeat.
+    let msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+        .expect("timeout waiting for list_shells")
+        .unwrap().unwrap();
+    let text = match msg { Message::Text(t) => t.to_string(), _ => panic!("expected text") };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["type"], "list_shells", "hermytt should send list_shells after first heartbeat");
+
+    ws.close(None).await.ok();
+}
+
+#[tokio::test]
+async fn mock_shytti_session_recovery_with_data() {
+    use base64::Engine;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (base, sessions, port) = start_server_with_ws().await;
+    let url = format!("ws://127.0.0.1:{}/control", port);
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+    // Auth.
+    let auth_msg = serde_json::json!({"type":"auth","auth":TOKEN,"name":"mock-shytti","role":"shell"});
+    ws.send(Message::Text(auth_msg.to_string().into())).await.unwrap();
+    let _ = ws.next().await; // auth response
+
+    // Heartbeat to trigger list_shells.
+    let hb = serde_json::json!({"type":"heartbeat","meta":{"host":"test","shells_active":1}});
+    ws.send(Message::Text(hb.to_string().into())).await.unwrap();
+
+    // Receive list_shells.
+    let msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+        .expect("timeout").unwrap().unwrap();
+    let text = match msg { Message::Text(t) => t.to_string(), _ => panic!("expected text") };
+    assert!(text.contains("list_shells"));
+
+    // Respond with one active shell.
+    let shells_list = serde_json::json!({
+        "type": "shells_list",
+        "shells": [{"shell_id": "mock-shell-1", "session_id": "mock-session-1"}]
+    });
+    ws.send(Message::Text(shells_list.to_string().into())).await.unwrap();
+
+    // Wait for hermytt to register the session.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Verify session is registered.
+    let session = sessions.get_session("mock-session-1").await;
+    assert!(session.is_some(), "recovered session should be registered");
+
+    // Verify session appears in REST API with host info.
+    let res: serde_json::Value = auth(client().get(format!("{}/sessions", base)))
+        .send().await.unwrap()
+        .json().await.unwrap();
+    let mock_session = res["sessions"].as_array().unwrap().iter()
+        .find(|s| s["id"] == "mock-session-1");
+    assert!(mock_session.is_some(), "recovered session should appear in /sessions");
+    assert_eq!(mock_session.unwrap()["host"], "mock-shytti");
+
+    // Send data FROM shytti → should reach the session's output channel.
+    let handle = sessions.get_session("mock-session-1").await.unwrap();
+    let mut output_rx = handle.output_tx.subscribe();
+
+    let data_b64 = base64::engine::general_purpose::STANDARD.encode(b"hello from PTY\n");
+    let data_msg = serde_json::json!({"type":"data","session_id":"mock-session-1","data":data_b64});
+    ws.send(Message::Text(data_msg.to_string().into())).await.unwrap();
+
+    // Verify output reaches subscribers.
+    let output = tokio::time::timeout(Duration::from_secs(2), output_rx.recv()).await
+        .expect("timeout waiting for output")
+        .unwrap();
+    assert_eq!(output, b"hello from PTY\n");
+
+    // Send stdin TO the session → should arrive as Input on the control WS.
+    let stdin_handle = sessions.get_session("mock-session-1").await.unwrap();
+    stdin_handle.stdin_tx.send(b"ls\n".to_vec()).await.unwrap();
+
+    let input_msg = tokio::time::timeout(Duration::from_secs(2), ws.next()).await
+        .expect("timeout waiting for input on control WS")
+        .unwrap().unwrap();
+    let text = match input_msg { Message::Text(t) => t.to_string(), _ => panic!("expected text") };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["type"], "input");
+    assert_eq!(v["session_id"], "mock-session-1");
+    let decoded = base64::engine::general_purpose::STANDARD.decode(v["data"].as_str().unwrap()).unwrap();
+    assert_eq!(decoded, b"ls\n");
+
+    ws.close(None).await.ok();
+}
+
+#[tokio::test]
+async fn mock_shytti_spawn_ok_data_flows() {
+    use base64::Engine;
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (base, sessions, port) = start_server_with_ws().await;
+    let url = format!("ws://127.0.0.1:{}/control", port);
+
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+
+    // Auth + heartbeat.
+    let auth_msg = serde_json::json!({"type":"auth","auth":TOKEN,"name":"mock-shytti-spawn","role":"shell"});
+    ws.send(Message::Text(auth_msg.to_string().into())).await.unwrap();
+    let _ = ws.next().await; // auth ok
+    let hb = serde_json::json!({"type":"heartbeat","meta":{"host":"test","shells_active":0}});
+    ws.send(Message::Text(hb.to_string().into())).await.unwrap();
+    let _ = ws.next().await; // list_shells
+    ws.send(Message::Text(serde_json::json!({"type":"shells_list","shells":[]}).to_string().into())).await.unwrap();
+
+    // Trigger spawn via REST.
+    let spawn_res: serde_json::Value = auth(client()
+        .post(format!("{}/hosts/mock-shytti-spawn/spawn", base)))
+        .header("Content-Type", "application/json")
+        .body("{}")
+        .send().await.unwrap()
+        .json().await.unwrap();
+
+    // We should receive a spawn command on the WS.
+    let spawn_msg = tokio::time::timeout(Duration::from_secs(5), ws.next()).await
+        .expect("timeout").unwrap().unwrap();
+    let text = match spawn_msg { Message::Text(t) => t.to_string(), _ => panic!("expected text") };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["type"], "spawn");
+    let req_id = v["req_id"].as_str().unwrap().to_string();
+
+    // Reply with spawn_ok.
+    let spawn_ok = serde_json::json!({
+        "type": "spawn_ok",
+        "req_id": req_id,
+        "shell_id": "spawned-shell-1",
+        "session_id": "spawned-session-1"
+    });
+    ws.send(Message::Text(spawn_ok.to_string().into())).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Verify session registered.
+    assert!(sessions.get_session("spawned-session-1").await.is_some());
+
+    // Send data → verify it reaches output.
+    let handle = sessions.get_session("spawned-session-1").await.unwrap();
+    let mut output_rx = handle.output_tx.subscribe();
+
+    let data_b64 = base64::engine::general_purpose::STANDARD.encode(b"$ ");
+    let data_msg = serde_json::json!({"type":"data","session_id":"spawned-session-1","data":data_b64});
+    ws.send(Message::Text(data_msg.to_string().into())).await.unwrap();
+
+    let output = tokio::time::timeout(Duration::from_secs(2), output_rx.recv()).await
+        .expect("timeout").unwrap();
+    assert_eq!(output, b"$ ");
+
+    // Stdin → verify it arrives as Input.
+    handle.stdin_tx.send(b"whoami\n".to_vec()).await.unwrap();
+
+    let input_msg = tokio::time::timeout(Duration::from_secs(2), ws.next()).await
+        .expect("timeout").unwrap().unwrap();
+    let text = match input_msg { Message::Text(t) => t.to_string(), _ => panic!("expected text") };
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["type"], "input");
+    assert_eq!(v["session_id"], "spawned-session-1");
+
+    ws.close(None).await.ok();
 }

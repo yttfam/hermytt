@@ -155,10 +155,12 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                     }
                                 }
                                 ShyttiMessage::Data { session_id, data } => {
-                                    // PTY output from shytti → broadcast to transports.
                                     if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data) {
                                         if let Some(handle) = state.sessions.get_session(&session_id).await {
-                                            let _ = handle.output_tx.send(bytes);
+                                            let _ = handle.output_tx.send(bytes.clone());
+                                            info!(name = %name, session = %session_id, bytes = bytes.len(), "data relayed");
+                                        } else {
+                                            warn!(name = %name, session = %session_id, "data for unknown session");
                                         }
                                     }
                                 }
@@ -172,14 +174,18 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                                 let hub = state.control_hub.clone();
                                                 let host_name = name.clone();
                                                 let sid = shell.session_id.clone();
+                                                info!(name = %host_name, session = %sid, "stdin forwarder started");
                                                 tokio::spawn(async move {
                                                     use base64::Engine;
                                                     while let Some(data) = stdin_rx.recv().await {
                                                         let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+                                                        info!(session = %sid, bytes = data.len(), "stdin → control WS");
                                                         let msg = ControlMessage::Input { session_id: sid.clone(), data: b64 };
                                                         if hub.send_to(&host_name, msg).await.is_err() { break; }
                                                     }
                                                 });
+                                            } else {
+                                                warn!(name = %name, session = %shell.session_id, "no stdin_rx for recovered session");
                                             }
                                             info!(name = %name, session = %shell.session_id, "session recovered");
                                         }
