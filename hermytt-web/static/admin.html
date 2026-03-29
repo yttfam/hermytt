@@ -676,7 +676,7 @@ async function editParserSession(name, sessionId) {
         `<option value="${esc(s.id)}" ${s.id === sessionId ? 'selected' : ''}>${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`
       ).join('')}
     </select></div>
-    <div class="field"><label>Telegram bot token</label><input type="text" id="edit-bot-token" value="${esc(session.bot_token || '')}" placeholder="123456:ABC-DEF..."></div>
+    <div class="field"><label>Telegram bot token</label><input type="text" id="edit-bot-token" value="" placeholder="${session.telegram_connected ? '(token set — leave blank to keep)' : '123456:ABC-DEF...'}"></div>
     <div class="field"><label>Debounce (ms): <span id="edit-debounce-val">${session.debounce_ms || 200}</span></label>
       <input type="range" id="edit-debounce" min="50" max="2000" step="50" value="${session.debounce_ms || 200}" oninput="document.getElementById('edit-debounce-val').textContent=this.value">
     </div>`;
