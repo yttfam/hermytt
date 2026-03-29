@@ -475,7 +475,7 @@ function openEditModal(name) {
     config.transport[name] = u; dirty = true; closeModal(); renderTransports(); saveConfig();
   };
 }
-function closeModal() { document.getElementById('modal-bg').classList.remove('active'); document.getElementById('modal-box').classList.remove('wide'); }
+function closeModal() { document.getElementById('modal-bg').classList.remove('active'); document.getElementById('modal-box').classList.remove('wide'); document.getElementById('modal-save').style.display = ''; }
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.getElementById('modal-bg').addEventListener('click', (e) => { if (e.target.id==='modal-bg') closeModal(); });
 
