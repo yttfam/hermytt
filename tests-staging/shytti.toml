@@ -1,0 +1,9 @@
+[hermytt]
+url = "http://127.0.0.1:7777"
+token = "staging-test-token"
+
+[daemon]
+listen = "127.0.0.1:7778"
+
+[shell]
+default = "/bin/bash"

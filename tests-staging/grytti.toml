@@ -1,0 +1,21 @@
+debounce_ms = 200
+
+[api]
+bind = "0.0.0.0"
+endpoint = "http://10.10.0.14:7780"
+hermytt_registry = "http://127.0.0.1:7777"
+hermytt_token = "staging-test-token"
+port = 7780
+
+[mqtt]
+host = "10.11.0.7"
+port = 1883
+username = "mqtt"
+password = "2Luxembourg3?"
+
+[[sessions]]
+session_id = "staging-placeholder"
+debounce_ms = 200
+
+[sessions.telegram]
+bot_token = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"

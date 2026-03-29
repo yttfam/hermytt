@@ -1,0 +1,23 @@
+[auth]
+token = "staging-test-token"
+
+[server]
+bind = "0.0.0.0"
+shell = "/bin/bash"
+scrollback = 1000
+recording_dir = "/opt/hermytt/recordings"
+
+[transport.rest]
+port = 7777
+
+[transport.mqtt]
+broker = "10.11.0.7"
+port = 1883
+username = "mqtt"
+password = "2Luxembourg3?"
+
+[transport.mqtt_pty]
+buffer_ms = 200
+
+[transport.tcp]
+port = 7779
