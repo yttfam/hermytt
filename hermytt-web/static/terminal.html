@@ -241,13 +241,13 @@ function addSession(id) {
     fontSize: isMobile ? 12 : 15,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace",
   });
-  term.open(container);
 
   const session = { id, term, ws: null, container };
   sessions.set(id, session);
-  connectSession(session);
   addTab(id);
-  switchTo(id);
+  switchTo(id);          // make visible BEFORE open — canvas needs real dimensions
+  term.open(container);
+  connectSession(session);
 }
 
 function connectSession(session) {
