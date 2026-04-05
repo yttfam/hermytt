@@ -310,8 +310,21 @@ function connectSession(session) {
 
   // Keyboard input — attach to container for focus
   session.container.tabIndex = 0;
+  // Ensure clicking canvas focuses the container (for paste events).
+  session.container.addEventListener('mousedown', () => session.container.focus());
+
   session.container.addEventListener('keydown', (e) => {
     if (composing) return;
+    // Cmd/Ctrl+V = paste from clipboard
+    if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+      e.preventDefault();
+      navigator.clipboard.readText().then(text => {
+        if (text && ws.readyState === WebSocket.OPEN && authed) ws.send(text);
+      }).catch(() => {
+        // Fallback: let the paste event handle it (non-HTTPS)
+      });
+      return;
+    }
     // Cmd/Ctrl+C with selection = copy to clipboard, don't send to PTY
     if ((e.metaKey || e.ctrlKey) && e.key === 'c' && session.term.hasSelection) {
       e.preventDefault();
