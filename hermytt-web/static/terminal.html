@@ -191,18 +191,40 @@ async function api(path, opts = {}) {
   return fetch(path, { ...opts, headers: { ...authHeaders(), ...opts.headers } });
 }
 
+// Session metadata cache: id → { name, host }
+const sessionMeta = new Map();
+
 async function fetchSessions() {
   const res = await api('/sessions');
   if (!res.ok) return [];
   const data = await res.json();
+  for (const s of data.sessions) sessionMeta.set(s.id, { name: s.name, host: s.host });
   return data.sessions.map(s => s.id);
 }
 
 async function createSession() {
-  const res = await api('/session', { method: 'POST' });
+  // Fetch available hosts.
+  const hostsRes = await api('/hosts');
+  if (!hostsRes.ok) return null;
+  const hosts = (await hostsRes.json()).hosts || [];
+  if (hosts.length === 0) { alert('No hosts connected — deploy shytti first'); return null; }
+
+  let hostName;
+  if (hosts.length === 1) {
+    hostName = hosts[0].name;
+  } else {
+    hostName = prompt('Spawn on which host?\n\n' + hosts.map((h, i) => `${i+1}. ${h.name} (${h.meta?.host || '?'})`).join('\n') + '\n\nEnter number or name:');
+    if (!hostName) return null;
+    // Allow number selection.
+    const idx = parseInt(hostName) - 1;
+    if (!isNaN(idx) && idx >= 0 && idx < hosts.length) hostName = hosts[idx].name;
+  }
+
+  const res = await api('/hosts/' + encodeURIComponent(hostName) + '/spawn', { method: 'POST', body: '{}' });
   if (!res.ok) return null;
   const data = await res.json();
-  return data.id;
+  if (data.session_id) sessionMeta.set(data.session_id, { name: null, host: hostName });
+  return data.session_id;
 }
 
 function addSession(id) {
@@ -408,17 +430,22 @@ function connectSession(session) {
 
   // Title changes
   session.term.onTitleChange((title) => {
-    if (activeId === session.id) document.title = title || 'hermytt';
+    if (activeId === session.id) document.title = (tabLabel(session.id)) + ' — hermytt';
   });
 
   session.ws = ws;
+}
+
+function tabLabel(id) {
+  const meta = sessionMeta.get(id);
+  return meta?.name || id.slice(0, 12);
 }
 
 function addTab(id) {
   const tab = document.createElement('div');
   tab.className = 'tab';
   tab.dataset.id = id;
-  tab.innerHTML = `<span>${id.slice(0, 8)}</span><span class="close">\u00d7</span>`;
+  tab.innerHTML = `<span>${tabLabel(id)}</span><span class="close">\u00d7</span>`;
   tab.addEventListener('click', (e) => {
     e.target.classList.contains('close') ? removeSession(id) : switchTo(id);
   });
@@ -442,7 +469,9 @@ function switchTo(id) {
     }, 50);
     if (!isMobile) session.container.focus();
     const connected = session.ws && session.ws.readyState === WebSocket.OPEN;
-    updateStatus(connected, connected ? id.slice(0,8) : 'connecting...');
+    const label = tabLabel(id);
+    updateStatus(connected, connected ? label : 'connecting...');
+    document.title = label + ' — hermytt';
   }
 }
 
