@@ -176,8 +176,18 @@ let activeId = null;
 function fitAndResize(session) {
   if (!session) return;
   session.term.fit();
+  const cols = session.term.cols, rows = session.term.rows;
+  // Skip bogus 1x1 resize — retry after layout settles.
+  if (cols <= 1 || rows <= 1) {
+    setTimeout(() => fitAndResize(session), 100);
+    return;
+  }
+  // Don't send if size hasn't changed.
+  if (cols === session._lastCols && rows === session._lastRows) return;
+  session._lastCols = cols;
+  session._lastRows = rows;
   if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-    session.ws.send(JSON.stringify({ resize: [session.term.cols, session.term.rows] }));
+    session.ws.send(JSON.stringify({ resize: [cols, rows] }));
   }
 }
 
