@@ -302,31 +302,32 @@ function connectSession(session) {
 
   // Dead key / IME composition handling (French keyboards, accented chars)
   let composing = false;
-  clipInput.addEventListener('compositionstart', () => { composing = true; });
-  clipInput.addEventListener('compositionend', (e) => {
+  session.container.addEventListener('compositionstart', () => { composing = true; });
+  session.container.addEventListener('compositionend', (e) => {
     composing = false;
     if (e.data && ws.readyState === WebSocket.OPEN && authed) ws.send(e.data);
   });
 
   // Keyboard input — attach to container for focus
-  // Hidden textarea for clipboard operations (paste doesn't work reliably on canvas/div).
-  const clipInput = document.createElement('textarea');
-  clipInput.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
-  clipInput.autocomplete = 'off';
-  clipInput.autocorrect = 'off';
-  clipInput.spellcheck = false;
-  session.container.appendChild(clipInput);
-
   session.container.tabIndex = 0;
-  // Focus the hidden textarea for keyboard + paste events.
-  session.container.addEventListener('mousedown', () => clipInput.focus());
-  // Also focus on tab navigation.
-  session.container.addEventListener('focus', () => clipInput.focus());
+  session.container.addEventListener('mousedown', () => session.container.focus());
 
-  clipInput.addEventListener('keydown', (e) => {
+  session.container.addEventListener('keydown', (e) => {
     if (composing) return;
-    // Cmd/Ctrl+V = paste — let the browser's paste event fire on the textarea
-    if ((e.metaKey || e.ctrlKey) && e.key === 'v') return;
+    // Cmd/Ctrl+V = paste — trigger via hidden textarea
+    if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+      // Briefly spawn a textarea, focus it, let browser paste, then read it
+      const ta = document.createElement('textarea');
+      ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.addEventListener('paste', (pe) => {
+        const text = pe.clipboardData?.getData('text');
+        if (text && ws.readyState === WebSocket.OPEN && authed) ws.send(text);
+        setTimeout(() => { ta.remove(); session.container.focus(); }, 0);
+      });
+      return;
+    }
     // Cmd/Ctrl+C with selection = copy to clipboard, don't send to PTY
     if ((e.metaKey || e.ctrlKey) && e.key === 'c' && session.term.hasSelection) {
       e.preventDefault();
@@ -343,8 +344,8 @@ function connectSession(session) {
     }
   });
 
-  // Clipboard paste — intercept images or send text to PTY
-  clipInput.addEventListener('paste', (e) => {
+  // Clipboard paste fallback (for browsers that fire paste on the container)
+  session.container.addEventListener('paste', (e) => {
     if (ws.readyState !== WebSocket.OPEN || !authed) return;
     const items = e.clipboardData?.items;
     if (!items) return;
