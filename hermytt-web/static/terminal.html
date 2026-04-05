@@ -182,11 +182,11 @@ function fitAndResize(session) {
     setTimeout(() => fitAndResize(session), 100);
     return;
   }
-  // Don't send if size hasn't changed.
-  if (cols === session._lastCols && rows === session._lastRows) return;
-  session._lastCols = cols;
-  session._lastRows = rows;
   if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+    // Don't send if size hasn't changed.
+    if (cols === session._lastCols && rows === session._lastRows) return;
+    session._lastCols = cols;
+    session._lastRows = rows;
     session.ws.send(JSON.stringify({ resize: [cols, rows] }));
   }
 }
@@ -255,13 +255,22 @@ function addSession(id) {
   const session = { id, term, ws: null, container };
   sessions.set(id, session);
   addTab(id);
-  switchTo(id);          // make visible BEFORE open — canvas needs real dimensions
+
+  // 1. Make container visible (display: block via .active class).
+  container.classList.add('active');
+  document.querySelectorAll('.term-container').forEach(c => { if (c !== container) c.classList.remove('active'); });
+  activeId = id;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
+
+  // 2. Open terminal — creates canvas. Container is visible so clientWidth/Height are real.
   term.open(container);
-  // Fit after open + layout settle, then connect (so first resize is correct).
-  requestAnimationFrame(() => {
+
+  // 3. Wait for layout, fit, then connect.
+  setTimeout(() => {
     fitAndResize(session);
     connectSession(session);
-  });
+    if (!isMobile) container.focus();
+  }, 50);
 }
 
 function connectSession(session) {
