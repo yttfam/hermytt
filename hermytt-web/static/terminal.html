@@ -281,14 +281,42 @@ function connectSession(session) {
 
   ws.onerror = () => ws.close();
 
+  // Clipboard helper — falls back to execCommand on plain HTTP
+  function copyText(text) {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    } else {
+      fallbackCopy(text);
+    }
+  }
+  function fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+
+  // Dead key / IME composition handling (French keyboards, accented chars)
+  let composing = false;
+  session.container.addEventListener('compositionstart', () => { composing = true; });
+  session.container.addEventListener('compositionend', (e) => {
+    composing = false;
+    if (e.data && ws.readyState === WebSocket.OPEN && authed) ws.send(e.data);
+  });
+
   // Keyboard input — attach to container for focus
   session.container.tabIndex = 0;
   session.container.addEventListener('keydown', (e) => {
+    if (composing) return;
     // Cmd/Ctrl+C with selection = copy to clipboard, don't send to PTY
     if ((e.metaKey || e.ctrlKey) && e.key === 'c' && session.term.hasSelection) {
       e.preventDefault();
       const text = session.term.copySelection();
-      if (text) navigator.clipboard.writeText(text).catch(() => {});
+      if (text) copyText(text);
       session.term.clearSelection();
       return;
     }
@@ -300,7 +328,7 @@ function connectSession(session) {
     }
   });
 
-  // Clipboard paste — intercept image data, send as control message
+  // Clipboard paste — intercept images or send text to PTY
   session.container.addEventListener('paste', (e) => {
     if (ws.readyState !== WebSocket.OPEN || !authed) return;
     const items = e.clipboardData?.items;
@@ -312,7 +340,6 @@ function connectSession(session) {
         if (!blob) continue;
         const reader = new FileReader();
         reader.onload = () => {
-          // result is "data:image/png;base64,XXXX" — strip the prefix
           const b64 = reader.result.split(',')[1];
           if (b64) {
             const ext = item.type.split('/')[1] || 'png';
@@ -320,10 +347,15 @@ function connectSession(session) {
           }
         };
         reader.readAsDataURL(blob);
-        return; // only handle first image
+        return;
       }
     }
-    // Plain text paste: let crytter/browser handle it normally
+    // Plain text paste — send directly to PTY
+    const text = e.clipboardData?.getData('text');
+    if (text) {
+      ws.send(text);
+      e.preventDefault();
+    }
   });
 
   // Selection — mouse events
@@ -345,7 +377,7 @@ function connectSession(session) {
     selMouseDown = false;
     session.term.mouseUp();
     const text = session.term.getSelection();
-    if (text) navigator.clipboard.writeText(text).catch(() => {});
+    if (text) copyText(text);
   });
 
   // Mouse wheel scroll
