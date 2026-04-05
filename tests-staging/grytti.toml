@@ -16,6 +16,3 @@ password = "2Luxembourg3?"
 [[sessions]]
 session_id = "staging-placeholder"
 debounce_ms = 200
-
-[sessions.telegram]
-bot_token = "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"

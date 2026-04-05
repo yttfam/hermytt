@@ -9,3 +9,4 @@ resume.sh
 *.swp
 *.swo
 .DS_Store
+.cargo/

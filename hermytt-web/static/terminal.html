@@ -284,6 +284,14 @@ function connectSession(session) {
   // Keyboard input — attach to container for focus
   session.container.tabIndex = 0;
   session.container.addEventListener('keydown', (e) => {
+    // Cmd/Ctrl+C with selection = copy to clipboard, don't send to PTY
+    if ((e.metaKey || e.ctrlKey) && e.key === 'c' && session.term.hasSelection) {
+      e.preventDefault();
+      const text = session.term.copySelection();
+      if (text) navigator.clipboard.writeText(text).catch(() => {});
+      session.term.clearSelection();
+      return;
+    }
     if (ws.readyState !== WebSocket.OPEN || !authed) return;
     const data = session.term.handleKeyEvent(e);
     if (data) {
@@ -316,6 +324,28 @@ function connectSession(session) {
       }
     }
     // Plain text paste: let crytter/browser handle it normally
+  });
+
+  // Selection — mouse events
+  let selMouseDown = false;
+  session.container.addEventListener('mousedown', (e) => {
+    const rect = session.container.querySelector('canvas')?.getBoundingClientRect();
+    if (!rect) return;
+    session.term.mouseDown(e.clientX - rect.left, e.clientY - rect.top);
+    selMouseDown = true;
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (!selMouseDown) return;
+    const rect = session.container.querySelector('canvas')?.getBoundingClientRect();
+    if (!rect) return;
+    session.term.mouseMove(e.clientX - rect.left, e.clientY - rect.top);
+  });
+  document.addEventListener('mouseup', () => {
+    if (!selMouseDown) return;
+    selMouseDown = false;
+    session.term.mouseUp();
+    const text = session.term.getSelection();
+    if (text) navigator.clipboard.writeText(text).catch(() => {});
   });
 
   // Mouse wheel scroll
