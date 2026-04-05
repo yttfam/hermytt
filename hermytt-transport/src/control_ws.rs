@@ -157,8 +157,12 @@ async fn handle_control_ws(mut socket: WebSocket, state: AppState) {
                                 ShyttiMessage::Data { session_id, data } => {
                                     if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data) {
                                         if let Some(handle) = state.sessions.get_session(&session_id).await {
-                                            let _ = handle.output_tx.send(bytes.clone());
-                                            info!(name = %name, session = %session_id, bytes = bytes.len(), "data relayed");
+                                            if let Ok(text) = std::str::from_utf8(&bytes) {
+                                                if let Ok(mut sb) = handle.scrollback.lock() {
+                                                    sb.push(text);
+                                                }
+                                            }
+                                            let _ = handle.output_tx.send(bytes);
                                         } else {
                                             warn!(name = %name, session = %session_id, "data for unknown session");
                                         }
@@ -444,6 +448,11 @@ async fn run_outbound_control(
                                 ShyttiMessage::Data { session_id, data } => {
                                     if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &data) {
                                         if let Some(handle) = sessions.get_session(&session_id).await {
+                                            if let Ok(text) = std::str::from_utf8(&bytes) {
+                                                if let Ok(mut sb) = handle.scrollback.lock() {
+                                                    sb.push(text);
+                                                }
+                                            }
                                             let _ = handle.output_tx.send(bytes);
                                         }
                                     }

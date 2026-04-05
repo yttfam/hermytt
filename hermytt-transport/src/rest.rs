@@ -516,6 +516,14 @@ async fn handle_ws_socket(
     let session_id = handle.id.clone();
     let mut output_rx = handle.subscribe_output();
 
+    // Send scrollback history to new client.
+    let history = handle.scrollback.lock().ok()
+        .map(|sb| sb.get_all().join("\n"))
+        .unwrap_or_default();
+    if !history.is_empty() {
+        let _ = socket.send(Message::text(history)).await;
+    }
+
     loop {
         tokio::select! {
             result = output_rx.recv() => {
