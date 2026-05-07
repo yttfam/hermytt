@@ -18,6 +18,8 @@ where
         "sandbox" => Ok(ServiceRole::Sandbox),
         "bot" => Ok(ServiceRole::Bot),
         "parser" => Ok(ServiceRole::Parser),
+        "gateway" => Ok(ServiceRole::Gateway),
+        "messenger" => Ok(ServiceRole::Messenger),
         _ => Ok(ServiceRole::Unknown),
     }
 }
@@ -31,6 +33,8 @@ pub enum ServiceRole {
     Sandbox,
     Bot,
     Parser,
+    Gateway,
+    Messenger,
     Unknown,
 }
 

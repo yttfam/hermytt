@@ -1,0 +1,18 @@
+{
+  "name": "hermytt-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-side TS sources for hermytt's web UI. Compiled to static/*.js, then bundled into the Rust binary via include_str! / include_bytes!.",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src-ts/chat.ts src-ts/login.ts src-ts/admin.ts --bundle --outdir=static --target=es2020 --format=iife --legal-comments=none && esbuild src-ts/terminal.ts --bundle --outdir=static --target=es2022 --format=esm --external:/vendor/* --legal-comments=none",
+    "watch": "esbuild src-ts/chat.ts src-ts/login.ts src-ts/admin.ts --bundle --outdir=static --target=es2020 --format=iife --watch & esbuild src-ts/terminal.ts --bundle --outdir=static --target=es2022 --format=esm --external:/vendor/* --watch",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "marked": "^18.0.3"
+  }
+}

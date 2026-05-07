@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod bootstrap;
 pub mod control_ws;
 pub mod mqtt;

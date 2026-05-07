@@ -39,6 +39,7 @@ pub struct RestTransport {
     /// Shared control hub for shytti management. Created externally so main.rs can access it.
     pub control_hub: Option<Arc<hermytt_core::ControlHub>>,
     pub registry: Option<Arc<ServiceRegistry>>,
+    pub auth_state: Option<crate::auth::AuthState>,
 }
 
 #[derive(Clone, Serialize)]
@@ -51,7 +52,7 @@ pub struct TransportInfo {
 pub(crate) type RecordingMap = Arc<Mutex<HashMap<String, RecordingHandle>>>;
 
 #[derive(Clone)]
-pub(crate) struct AppState {
+pub struct AppState {
     pub(crate) sessions: Arc<SessionManager>,
     pub(crate) auth_token: Option<String>,
     pub(crate) shell: String,
@@ -65,6 +66,7 @@ pub(crate) struct AppState {
     pub(crate) control_hub: Arc<hermytt_core::ControlHub>,
     pub(crate) paired_hosts: Arc<Mutex<hermytt_core::pairing::PairedHosts>>,
     pub(crate) keys_path: PathBuf,
+    pub auth: crate::auth::AuthState,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +112,12 @@ impl Transport for RestTransport {
             paired_hosts: Arc::new(Mutex::new(hermytt_core::pairing::PairedHosts::load(
                 &hermytt_core::pairing::keys_path(self.config_path.as_deref()),
             ))),
+            auth: self.auth_state.clone().unwrap_or_else(|| {
+                crate::auth::AuthState::load(
+                    hermytt_core::pairing::keys_path(self.config_path.as_deref())
+                        .with_file_name("users.toml"),
+                )
+            }),
         };
 
         // API routes behind auth.
@@ -146,6 +154,11 @@ impl Transport for RestTransport {
             // Internal session API (for Shytti and external orchestrators).
             .route("/internal/session", post(register_managed_session))
             .route("/internal/session/{id}", axum::routing::delete(unregister_managed_session))
+            // User auth (auth-gated; /login + /me below are public).
+            .route("/auth/logout", post(crate::auth::logout))
+            .route("/auth/users", get(crate::auth::list_users).post(crate::auth::add_user))
+            .route("/auth/users/{username}", axum::routing::delete(crate::auth::delete_user))
+            .route("/auth/users/{username}/password", axum::routing::put(crate::auth::change_password))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 auth_middleware,
@@ -153,7 +166,9 @@ impl Transport for RestTransport {
 
         // Public routes (no auth required).
         let public_routes = Router::new()
-            .route("/bootstrap/shytti", get(crate::bootstrap::bootstrap_shytti));
+            .route("/bootstrap/shytti", get(crate::bootstrap::bootstrap_shytti))
+            .route("/auth/login", post(crate::auth::login))
+            .route("/auth/me", get(crate::auth::me));
 
         // WebSocket: auth via first message, not query param.
         let ws_routes = Router::new()
@@ -206,12 +221,17 @@ async fn auth_middleware(
     req: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let Some(expected) = &state.auth_token else {
-        // No token configured — allow all.
-        return Ok(next.run(req).await);
-    };
+    let path = req.uri().path().to_string();
+    // Check session cookie first — it's the browser path and the most common case.
+    let cookie_token = crate::auth::extract_session_cookie(req.headers());
+    let has_cookie_header = req.headers().get(axum::http::header::COOKIE).is_some();
+    if let Some(ref tok) = cookie_token {
+        if state.auth.validate_session(tok).await.is_some() {
+            return Ok(next.run(req).await);
+        }
+    }
 
-    // Check X-Hermytt-Key header first, then ?token= query param.
+    // Static service token via X-Hermytt-Key or ?token= (services + token-only fallback).
     let provided = req
         .headers()
         .get("X-Hermytt-Key")
@@ -219,13 +239,26 @@ async fn auth_middleware(
         .map(String::from)
         .or(query.token);
 
-    match provided {
-        Some(ref t) if t == expected => Ok(next.run(req).await),
-        _ => {
-            warn!(transport = "rest", "unauthorized request");
-            Err(StatusCode::UNAUTHORIZED)
+    if let Some(expected) = &state.auth_token {
+        if let Some(ref t) = provided {
+            if t == expected {
+                return Ok(next.run(req).await);
+            }
         }
+    } else if !state.auth.has_users().await {
+        // No token AND no users configured — allow all (single-host dev mode).
+        return Ok(next.run(req).await);
     }
+
+    warn!(
+        transport = "rest",
+        path = %path,
+        has_cookie_header,
+        cookie_session_len = cookie_token.as_deref().map(|s| s.len()).unwrap_or(0),
+        has_x_hermytt_key = provided.is_some(),
+        "unauthorized request"
+    );
+    Err(StatusCode::UNAUTHORIZED)
 }
 
 async fn server_info(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -463,10 +496,12 @@ async fn stream_stdout_default(
 async fn ws_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    let preauth = ws_cookie_preauth(&headers, &state).await;
     ws.on_upgrade(move |socket| async move {
-        let Some(socket) = ws_auth(socket, &state.auth_token).await else { return };
+        let Some(socket) = ws_auth(socket, &state.auth_token, preauth).await else { return };
         let Some(handle) = state.sessions.get_session(&id).await else { return };
         handle_ws_socket(socket, handle, state.sessions.clone(), state.files_dir.clone()).await;
     })
@@ -474,18 +509,32 @@ async fn ws_handler(
 
 async fn ws_handler_default(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    let preauth = ws_cookie_preauth(&headers, &state).await;
     ws.on_upgrade(move |socket| async move {
-        let Some(socket) = ws_auth(socket, &state.auth_token).await else { return };
+        let Some(socket) = ws_auth(socket, &state.auth_token, preauth).await else { return };
         let Ok(handle) = state.sessions.default_session().await else { return };
         handle_ws_socket(socket, handle, state.sessions.clone(), state.files_dir.clone()).await;
     })
 }
 
+/// Validate session cookie during WS upgrade. Returns true if the cookie auths the connection;
+/// the WS handler then skips the first-message token exchange.
+async fn ws_cookie_preauth(headers: &axum::http::HeaderMap, state: &AppState) -> bool {
+    let Some(tok) = crate::auth::extract_session_cookie(headers) else { return false };
+    state.auth.validate_session(&tok).await.is_some()
+}
+
 /// First-message auth: client sends token as first WS message.
 /// Returns the socket if auth passes, None if rejected.
-async fn ws_auth(mut socket: WebSocket, expected: &Option<String>) -> Option<WebSocket> {
+/// `preauth=true` means the HTTP upgrade carried a valid session cookie — skip the token dance entirely.
+async fn ws_auth(mut socket: WebSocket, expected: &Option<String>, preauth: bool) -> Option<WebSocket> {
+    if preauth {
+        let _ = socket.send(Message::text("auth:ok")).await;
+        return Some(socket);
+    }
     let Some(token) = expected else {
         // No auth configured.
         return Some(socket);
@@ -1033,7 +1082,7 @@ async fn internal_pipe_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| async move {
-        let Some(socket) = ws_auth(socket, &state.auth_token).await else { return };
+        let Some(socket) = ws_auth(socket, &state.auth_token, false).await else { return };
         let Some(handle) = state.sessions.get_session(&id).await else { return };
         handle_internal_pipe(socket, handle, state.sessions.clone()).await;
     })

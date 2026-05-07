@@ -1,0 +1,22 @@
+[package]
+name = "pyttch-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Stateless Telegram <-> apytti router. Throwaway: replaces a future pyttch.daemon.
+# Sync everywhere — matches pyttch's lib style, no tokio runtime.
+
+[dependencies]
+pyttch = { path = "../../pyttch", default-features = false }
+ureq = { version = "3", features = ["json"] }
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+hostname = "0.4"
+tiny_http = "0.12"
+base64.workspace = true

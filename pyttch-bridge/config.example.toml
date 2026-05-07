@@ -1,0 +1,23 @@
+# pyttch-bridge: stateless Telegram <-> apytti router.
+#
+# Lives at /etc/pyttch-bridge/config.toml (or pass --config).
+# After editing: sudo systemctl restart pyttch-bridge
+
+[hermytt]
+url = "http://localhost:7777"
+token = "REPLACE_WITH_HERMYTT_TOKEN"
+# name = "pyttch-bridge-mista"   # optional — defaults to pyttch-bridge-<hostname>
+
+# One [[bots]] block per Telegram bot. Each bot can serve multiple chat_ids.
+# Each (bot, chat_id) pair gets its own thread.
+
+[[bots]]
+id = "marianne"
+token = "REPLACE_WITH_TELEGRAM_BOT_TOKEN"
+allowed_chat_ids = [REPLACE_WITH_CHAT_ID]   # required, empty = closed
+apytti = "apytti-speedwagon"                # service name in hermytt's registry
+# backend = "claude"                        # optional override per request
+# model = "claude-sonnet-4-6"               # optional
+# effort = "low"                            # optional
+# dir = "/Users/cali/Developer/perso/foo"   # optional CWD for claude
+# parse_mode = "Markdown"                   # optional: "Markdown" | "MarkdownV2" | "HTML"

@@ -38,6 +38,7 @@ async fn start_server() -> (String, Arc<SessionManager>) {
         extra_routes: None,
         control_hub: Some(control_hub),
         registry: Some(registry),
+        auth_state: None,
     });
 
     let sessions_clone = sessions.clone();
@@ -192,6 +193,77 @@ async fn parser_role_recognized() {
     let grytti = res["services"].as_array().unwrap().iter()
         .find(|s| s["name"] == "grytti").unwrap().clone();
     assert_eq!(grytti["role"], "parser", "parser role should not fall back to unknown");
+}
+
+// ============================================================
+// Bug: Gateway role not recognized in registry (apytti)
+// Fix: add Gateway role to ServiceRole enum
+// ============================================================
+
+#[tokio::test]
+async fn gateway_role_recognized() {
+    let (base, _) = start_server().await;
+
+    auth(client().post(format!("{}/registry/announce", base)))
+        .header("Content-Type", "application/json")
+        .body(r#"{"name":"apytti","role":"gateway","endpoint":"http://localhost:7781"}"#)
+        .send().await.unwrap();
+
+    let res: serde_json::Value = auth(client().get(format!("{}/registry", base)))
+        .send().await.unwrap()
+        .json().await.unwrap();
+    let apytti = res["services"].as_array().unwrap().iter()
+        .find(|s| s["name"] == "apytti").unwrap().clone();
+    assert_eq!(apytti["role"], "gateway", "gateway role should not fall back to unknown");
+}
+
+// ============================================================
+// Bug: proxy did not forward X-Hermytt-Key header
+// Fix: forward all request headers except hop-by-hop
+// Apytti's PUT /config requires this header when config_token is set.
+// ============================================================
+
+#[tokio::test]
+async fn proxy_forwards_auth_header() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (base, _) = start_server().await;
+    let received = Arc::new(AtomicBool::new(false));
+
+    // Minimal upstream: read bytes, look for X-Hermytt-Key in headers, reply 200.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_port = listener.local_addr().unwrap().port();
+    let received_clone = received.clone();
+    tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let mut buf = [0u8; 4096];
+            let n = sock.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+            if req.contains("x-hermytt-key:") {
+                received_clone.store(true, Ordering::SeqCst);
+            }
+            let _ = sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"ok\":true}"
+            ).await;
+        }
+    });
+
+    auth(client().post(format!("{}/registry/announce", base)))
+        .header("Content-Type", "application/json")
+        .body(format!(
+            r#"{{"name":"apytti","role":"gateway","endpoint":"http://127.0.0.1:{}"}}"#,
+            upstream_port
+        ))
+        .send().await.unwrap();
+
+    let res = auth(client().put(format!("{}/registry/apytti/proxy/config", base)))
+        .header("Content-Type", "application/json")
+        .body(r#"{"active":"claude"}"#)
+        .send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert!(received.load(Ordering::SeqCst), "upstream should have seen X-Hermytt-Key header");
 }
 
 // ============================================================
@@ -436,6 +508,7 @@ async fn start_server_with_ws() -> (String, Arc<SessionManager>, u16) {
         extra_routes: None,
         control_hub: Some(control_hub),
         registry: Some(registry),
+        auth_state: None,
     });
 
     let sessions_clone = sessions.clone();

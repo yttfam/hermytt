@@ -50,6 +50,21 @@ enum Commands {
 
     /// Print an example config file
     ExampleConfig,
+
+    /// Add a user (bootstrap path — first user becomes admin once the server starts).
+    AddUser {
+        /// Path to config file — used to locate users.toml alongside it
+        #[arg(short, long)]
+        config: Option<String>,
+
+        /// Username
+        #[arg(short, long)]
+        user: String,
+
+        /// Password (read from stdin if omitted)
+        #[arg(short, long)]
+        password: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -68,6 +83,25 @@ async fn main() -> Result<()> {
         }
         Commands::ExampleConfig => {
             print!("{}", include_str!("../../hermytt.example.toml"));
+            return Ok(());
+        }
+        Commands::AddUser { config, user, password } => {
+            let users_path = hermytt_core::pairing::keys_path(config.as_deref())
+                .with_file_name("users.toml");
+            let pw = match password {
+                Some(p) => p,
+                None => {
+                    use std::io::Read;
+                    let mut buf = String::new();
+                    std::io::stdin().read_to_string(&mut buf)?;
+                    buf.trim().to_string()
+                }
+            };
+            if pw.len() < 6 {
+                anyhow::bail!("password must be at least 6 chars");
+            }
+            hermytt_transport::auth::cli_add_user(&users_path, &user, &pw)?;
+            println!("user '{}' added → {}", user, users_path.display());
             return Ok(());
         }
         Commands::Start {
@@ -192,6 +226,7 @@ async fn start_server(
             extra_routes: Some(hermytt_web::routes()),
             control_hub: Some(control_hub.clone()),
             registry: Some(registry.clone()),
+            auth_state: None,  // RestTransport defaults to <config-dir>/users.toml.
         });
         let sessions = sessions.clone();
         tasks.push(tokio::spawn(async move {

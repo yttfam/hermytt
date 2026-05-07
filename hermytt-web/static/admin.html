@@ -2,7 +2,11 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#060610">
 <title>hermytt command center</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap');
@@ -63,6 +67,53 @@ tr:hover td { background: rgba(74,138,244,0.03); }
 .role-sandbox { background: rgba(48,208,208,0.1); color: var(--cyan); border: 1px solid rgba(48,208,208,0.2); }
 .role-bot { background: rgba(232,176,48,0.1); color: var(--yellow); border: 1px solid rgba(232,176,48,0.2); }
 .role-parser { background: rgba(240,150,60,0.1); color: #f0963c; border: 1px solid rgba(240,150,60,0.2); }
+.role-gateway { background: rgba(255,99,132,0.1); color: #ff6384; border: 1px solid rgba(255,99,132,0.2); }
+.role-messenger { background: rgba(48,208,208,0.1); color: var(--cyan); border: 1px solid rgba(48,208,208,0.2); }
+
+/* Gateway panel */
+.gw-input, .gw-select, .gw-textarea { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px 7px; font-family: var(--font); font-size: 11px; border-radius: 3px; outline: none; width: 100%; }
+.gw-input:focus, .gw-select:focus, .gw-textarea:focus { border-color: var(--blue); }
+.gw-textarea { resize: vertical; min-height: 90px; line-height: 1.4; }
+.gw-lbl { display: block; font-size: 10px; color: var(--text-dim); margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.3px; }
+.gw-tab { background: transparent; border: none; color: var(--text-dim); padding: 6px 12px; font-family: var(--font); font-size: 11px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.gw-tab:hover { color: var(--text); }
+.gw-tab.active { color: var(--text); border-bottom-color: var(--blue); }
+.gw-tab.disabled { color: var(--text-muted); }
+.gw-tab.disabled::after { content: ' ·'; color: var(--text-muted); }
+.gw-chk { display: flex; align-items: center; gap: 6px; padding: 4px 0; color: var(--text); font-size: 11px; cursor: pointer; user-select: none; }
+.gw-chk input { cursor: pointer; accent-color: var(--blue); }
+.gw-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 8px; }
+.gw-row.wide { grid-column: 1 / -1; }
+.gw-meta-row { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); flex-wrap: wrap; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.gw-resp { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 3px; font-size: 11px; line-height: 1.5; max-height: 340px; overflow: auto; white-space: pre-wrap; font-family: var(--font); }
+
+/* Chat layout */
+.gw-chat-grid { display: grid; grid-template-columns: 240px 1fr; gap: 10px; height: 480px; }
+.gw-chat-side { background: var(--bg); border: 1px solid var(--border); border-radius: 3px; overflow: auto; }
+.gw-chat-side-row { padding: 6px 8px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 11px; line-height: 1.3; }
+.gw-chat-side-row:hover { background: var(--bg-header); }
+.gw-chat-side-row.selected { background: rgba(74,138,244,0.08); border-left: 2px solid var(--blue); padding-left: 6px; }
+.gw-chat-side-row .preview { color: var(--text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gw-chat-side-row .meta { color: var(--text-muted); font-size: 10px; margin-top: 2px; display: flex; justify-content: space-between; }
+.gw-chat-main { display: flex; flex-direction: column; min-height: 0; }
+.gw-chat-msgs { flex: 1; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 10px; font-size: 11px; line-height: 1.55; min-height: 0; }
+.gw-chat-empty { color: var(--text-muted); font-style: italic; text-align: center; padding: 40px 12px; }
+.gw-chat-msg { margin-bottom: 12px; }
+.gw-chat-msg .role { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 3px; display: flex; gap: 8px; align-items: baseline; }
+.gw-chat-msg .role .model { color: var(--text-dim); text-transform: none; letter-spacing: 0; font-size: 10px; }
+.gw-chat-msg.user .role { color: var(--blue); }
+.gw-chat-msg.assistant .role { color: var(--green); }
+.gw-chat-msg .content { white-space: pre-wrap; word-break: break-word; }
+.gw-chat-msg .tool-chip { display: inline-block; background: rgba(160,112,240,0.12); color: var(--purple); border: 1px solid rgba(160,112,240,0.3); border-radius: 3px; padding: 0 6px; font-size: 10px; margin: 0 2px; vertical-align: baseline; }
+.gw-chat-msg .tool-uses { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.gw-chat-msg .tool-uses .tu { background: rgba(160,112,240,0.06); border: 1px solid rgba(160,112,240,0.2); border-radius: 3px; padding: 1px 6px; font-size: 10px; color: var(--text-dim); }
+.gw-chat-msg .tool-uses .tu strong { color: var(--purple); margin-right: 4px; }
+.gw-chat-msg .thinking { background: rgba(232,176,48,0.06); border-left: 2px solid var(--yellow); padding: 2px 6px; color: var(--text-dim); font-style: italic; font-size: 10px; }
+.gw-chat-send { display: flex; gap: 6px; margin-top: 8px; align-items: end; }
+.gw-chat-send textarea { flex: 1; min-height: 38px; max-height: 120px; }
+.gw-chat-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 11px; color: var(--text-dim); }
+.gw-chat-toolbar .ctx { color: var(--text-dim); font-size: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gw-chat-toolbar .warn { color: var(--yellow); }
 
 /* Session names */
 .session-name { cursor: text; border-bottom: 1px dashed var(--border); padding-bottom: 1px; }
@@ -128,12 +179,58 @@ tr.svc-configurable:hover td { background: rgba(74,138,244,0.06); }
 /* Scanline effect on header */
 #hdr::after { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px); pointer-events: none; }
 #hdr { position: relative; }
+
+/* === Mobile === */
+@media (max-width: 720px) {
+  body { font-size: 13px; }
+  #hdr { padding: 10px 12px; }
+  #hdr .logo { font-size: 13px; }
+  #hdr nav { gap: 12px; font-size: 12px; }
+  #hdr nav span#whoami, #hdr nav a[onclick*="logout"] { display: none; }
+
+  /* Status strip wraps + stacks. Hide secondary stat items, keep status + sessions count. */
+  #strip { padding: 8px 12px; gap: 12px; flex-wrap: wrap; }
+  .s-item { font-size: 11px; }
+
+  /* Single-column grid on phones — every panel becomes full width. */
+  .grid { grid-template-columns: 1fr; }
+  .panel { min-width: 0; }
+  .panel-body { padding: 8px 10px; min-height: 0; }
+  .panel-hdr { padding: 8px 10px; font-size: 11px; }
+
+  /* Tables: drop the dense desktop padding, allow horizontal scroll if a row's still too wide. */
+  td, th { padding: 8px 6px; font-size: 12px; }
+  td .btn { padding: 6px 10px; font-size: 11px; min-height: 36px; }
+
+  /* Family table: hide the host column on phones (the name already encodes it). */
+  #family-table td:nth-child(4),
+  table tr th:nth-child(4):empty { display: none; }
+
+  /* Modals: full-screen on phones for easier scrolling, bigger inputs. */
+  .modal { width: 100vw; height: 100vh; max-width: 100vw; max-height: 100vh; border-radius: 0; padding: 16px; overflow: auto; }
+  .modal.wide { width: 100vw; }
+  .field input, .field select { font-size: 16px; padding: 10px; min-height: 44px; }
+  .modal-actions { position: sticky; bottom: 0; background: var(--bg-card); padding-top: 10px; }
+  .modal-actions .btn { min-height: 44px; padding: 10px 14px; font-size: 13px; }
+
+  /* Buttons across the UI become finger-friendly. */
+  .btn { min-height: 36px; padding: 7px 12px; font-size: 11px; }
+
+  /* Nested gateway/messenger sub-tables can get squashy — let them scroll horizontally if needed. */
+  .panel-body table { display: block; overflow-x: auto; white-space: nowrap; }
+  .panel-body table td, .panel-body table th { white-space: normal; }
+
+  /* Gateway panel inputs: typing in chat tab, model fields, etc. */
+  .gw-input, .gw-select, .gw-textarea { font-size: 16px; min-height: 38px; }
+  .gw-row { grid-template-columns: 1fr; }
+  .gw-chat-grid { grid-template-columns: 1fr; height: auto; }
+}
 </style>
 </head>
 <body>
 <div id="hdr">
   <div class="logo">HERMYTT <span>command center</span></div>
-  <nav><a href="/">terminal</a> <a href="/admin">admin</a> <a href="#" onclick="sessionStorage.removeItem('hermytt-token');location.href='/login'" style="color:#5a5a7e">logout</a></nav>
+  <nav><a href="/">terminal</a> <a href="/chat">chat</a> <a href="/admin">admin</a> <span id="whoami" style="color:#5a5a7e"></span> <a href="#" onclick="logout();return false" style="color:#5a5a7e">logout</a></nav>
 </div>
 <div id="strip">
   <div class="s-item"><div class="pulse"></div> <span id="s-status">connecting</span></div>
@@ -157,7 +254,7 @@ tr.svc-configurable:hover td { background: rgba(74,138,244,0.06); }
 
   <!-- Sessions -->
   <div class="panel">
-    <div class="panel-hdr">Sessions <button class="btn btn-blue" id="btn-new-session" style="font-size:10px">+ new</button></div>
+    <div class="panel-hdr">Sessions <span style="display:flex;gap:6px"><button class="btn btn-blue" id="btn-new-session" style="font-size:10px">+ new</button><button class="btn btn-red" id="btn-kill-all" style="font-size:10px" title="Kill every session — useful after a stale-shell flood post-restart">kill all</button></span></div>
     <div class="panel-body" style="padding:0">
       <table>
         <thead><tr><th></th><th>id</th><th></th></tr></thead>
@@ -175,6 +272,17 @@ tr.svc-configurable:hover td { background: rgba(74,138,244,0.06); }
         <button class="btn btn-blue" id="btn-exec">run</button>
       </div>
       <div id="exec-out"></div>
+    </div>
+  </div>
+
+  <!-- Users -->
+  <div class="panel full">
+    <div class="panel-hdr">
+      Users <span id="users-count" style="color:var(--text-muted)"></span>
+      <button class="btn btn-blue" id="btn-add-user" style="font-size:10px">+ add user</button>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <table><tbody id="users-table"></tbody></table>
     </div>
   </div>
 
@@ -205,551 +313,6 @@ tr.svc-configurable:hover td { background: rgba(74,138,244,0.06); }
   </div>
 </div>
 
-<script>
-// Auth: redirect to login if no token.
-const TOKEN = sessionStorage.getItem('hermytt-token') || '';
-if (!TOKEN) { location.href = '/login?next=' + encodeURIComponent(location.pathname); }
-function authHeaders() { const h = {'Content-Type':'application/json'}; if (TOKEN) h['X-Hermytt-Key'] = TOKEN; return h; }
-const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
-
-function banner(msg, cls) {
-  const el = document.getElementById('banner-area');
-  el.textContent = msg; el.className = 'banner ' + cls;
-}
-
-function relTime(ts) {
-  if (!ts) return '-';
-  const secs = Math.floor((Date.now() / 1000) - ts);
-  if (secs < 5) return 'now';
-  if (secs < 60) return secs + 's ago';
-  if (secs < 3600) return Math.floor(secs/60) + 'm ago';
-  return Math.floor(secs/3600) + 'h ago';
-}
-
-// --- Family / Registry ---
-async function refreshFamily() {
-  try {
-    const res = await fetch('/registry', { headers: authHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
-    const services = data.services || [];
-    document.getElementById('s-services').textContent = services.filter(s => s.status === 'connected').length;
-    document.getElementById('svc-count').textContent = services.length ? ` (${services.length})` : '';
-    const tbody = document.getElementById('family-table');
-    if (!services.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty-row">no family members connected</td></tr>';
-      return;
-    }
-    tbody.innerHTML = services.map(s => {
-      const on = s.status === 'connected';
-      const dotCls = on ? 'dot-on' : 'dot-off';
-      const role = (s.role || 'shell').toLowerCase();
-      const configurable = on && s.endpoint.startsWith('http');
-      const rowCls = configurable ? 'svc-configurable' : '';
-      const click = configurable ? `onclick="openServicePanel('${esc(s.name)}')"` : '';
-      return `<tr class="${rowCls}" ${click}>
-        <td><span class="dot ${dotCls}"></span></td>
-        <td>${esc(s.name)}${configurable?' \u2699':''}</td>
-        <td><span class="role role-${role}">${esc(role)}</span></td>
-        <td style="color:var(--text-dim)">${esc(s.meta?.host || s.name)}</td>
-        <td><span class="meta-tag">${esc(s.endpoint === 'control-ws' ? 'mode 1' : s.endpoint === 'paired' ? 'mode 2' : s.endpoint || '-')}</span></td>
-        <td style="color:var(--text-muted)">${relTime(s.last_seen)}</td>
-      </tr>`;
-    }).join('');
-  } catch(e) {}
-}
-
-// --- Sessions ---
-async function refreshSessions() {
-  const res = await fetch('/sessions', { headers: authHeaders() });
-  if (!res.ok) return;
-  const data = await res.json();
-  document.getElementById('s-sessions').textContent = data.sessions.length;
-  const tbody = document.getElementById('sessions-table');
-  tbody.innerHTML = data.sessions.map(s => `
-    <tr>
-      <td><span class="dot dot-on"></span></td>
-      <td><span class="session-name" ondblclick="renameSession('${esc(s.id)}',this)" title="double-click to rename">${esc(s.name || s.id)}</span>${s.host ? ' <span class="meta-tag">' + esc(s.host) + '</span>' : ''}</td>
-      <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end">
-        <a href="/#${encodeURIComponent(s.id)}" class="btn">open</a>
-        <button class="btn btn-red" onclick="killSession('${esc(s.id)}')">kill</button>
-      </td>
-    </tr>
-  `).join('') || '<tr><td colspan="3" class="empty-row">no sessions</td></tr>';
-}
-
-document.getElementById('btn-add-host').addEventListener('click', () => {
-  document.getElementById('modal-title').textContent = 'Pair Host';
-  document.getElementById('modal-fields').innerHTML = `
-    <div class="field">
-      <label>pairing token</label>
-      <input type="text" id="pair-token" placeholder="paste token from shytti pair" spellcheck="false" autocomplete="off">
-      <div class="hint">run "shytti pair" on the target machine, paste the token here</div>
-    </div>
-  `;
-  document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').onclick = async () => {
-    const token = document.getElementById('pair-token').value.trim();
-    if (!token) return;
-    closeModal();
-    banner('pairing...', 'warn');
-    const res = await fetch('/hosts/pair', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ token }) });
-    const data = await res.json();
-    if (!res.ok) { banner(data.error || 'pairing failed', 'err'); return; }
-    banner('paired with ' + data.name, 'ok');
-    setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000);
-    refreshAll();
-  };
-});
-
-async function killSession(id) {
-  if (!confirm('Kill session ' + id.slice(0,8) + '?')) return;
-  await fetch('/internal/session/' + encodeURIComponent(id), { method: 'DELETE', headers: authHeaders() });
-  refreshSessions();
-}
-
-function renameSession(id, el) {
-  const current = el.textContent;
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = current;
-  input.style.cssText = 'font-size:12px;background:var(--bg);border:1px solid var(--accent);color:var(--text);padding:1px 4px;font-family:var(--font);width:180px;border-radius:3px';
-  el.replaceWith(input);
-  input.focus();
-  input.select();
-  const save = async () => {
-    const name = input.value.trim();
-    if (name && name !== current) {
-      await fetch('/session/' + encodeURIComponent(id) + '/name', {
-        method: 'PUT', headers: authHeaders(), body: JSON.stringify({ name })
-      });
-    }
-    refreshSessions();
-  };
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-    if (e.key === 'Escape') { input.value = current; input.blur(); }
-  });
-}
-
-// --- Info ---
-async function refreshInfo() {
-  try {
-    const res = await fetch('/info', { headers: authHeaders() });
-    if (!res.ok) { document.getElementById('s-status').textContent = 'error'; return; }
-    const data = await res.json();
-    document.getElementById('s-status').textContent = 'online';
-    document.getElementById('s-shell').textContent = data.shell?.split('/').pop() || '-';
-  } catch(e) { document.getElementById('s-status').textContent = 'offline'; }
-}
-
-document.getElementById('btn-new-session').addEventListener('click', async () => {
-  // Check for connected shytti hosts.
-  let hosts = [];
-  try {
-    const res = await fetch('/hosts', { headers: authHeaders() });
-    if (res.ok) { const data = await res.json(); hosts = data.hosts || []; }
-  } catch(e) {}
-
-  if (hosts.length === 0) {
-    banner('no hosts connected — deploy shytti first', 'err');
-    return;
-  }
-
-  // Show host picker (or spawn directly if only one host).
-  if (hosts.length === 1) {
-    const url = '/hosts/' + encodeURIComponent(hosts[0].name) + '/spawn';
-    const res = await fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify({}) });
-    const data = await res.json();
-    if (!res.ok) { banner(data.error || 'spawn failed', 'err'); }
-    refreshSessions();
-    return;
-  }
-
-  const modal = document.getElementById('modal-fields');
-  document.getElementById('modal-title').textContent = 'New Session';
-  modal.innerHTML = `
-    <div class="field"><label>host</label>
-    <select id="host-select" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;font-family:var(--font);font-size:11px;border-radius:3px">
-      ${hosts.map(h => `<option value="${esc(h.name)}">${esc(h.name)}${h.meta?.host ? ' (' + esc(h.meta.host) + ')' : ''}</option>`).join('')}
-    </select></div>
-  `;
-  document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').onclick = async () => {
-    const host = document.getElementById('host-select').value;
-    closeModal();
-    const url = '/hosts/' + encodeURIComponent(host) + '/spawn';
-    const res = await fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify({}) });
-    const data = await res.json();
-    if (!res.ok) { banner(data.error || 'spawn failed', 'err'); }
-    refreshSessions();
-  };
-});
-
-// --- Exec ---
-document.getElementById('btn-exec').addEventListener('click', runExec);
-document.getElementById('exec-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') runExec(); });
-async function runExec() {
-  const input = document.getElementById('exec-input');
-  const output = document.getElementById('exec-out');
-  const cmd = input.value.trim(); if (!cmd) return;
-  output.style.display = 'block'; output.textContent = '...';
-  const res = await fetch('/exec', { method:'POST', headers:authHeaders(), body:JSON.stringify({input:cmd}) });
-  if (!res.ok) { output.textContent = `err ${res.status}`; return; }
-  const data = await res.json();
-  let text = data.stdout || '';
-  if (data.stderr) text += (text ? '\n' : '') + data.stderr;
-  if (data.exit_code !== 0) text += `\n[exit ${data.exit_code}]`;
-  output.textContent = text || '(empty)';
-  input.value = '';
-}
-
-// --- Transports ---
-let config = null, dirty = false;
-
-const TRANSPORT_DEFS = {
-  rest: { label:'REST + WS', fields:[{key:'port',label:'Port',type:'number',required:true,default:7777}] },
-  mqtt: { label:'MQTT', fields:[
-    {key:'broker',label:'Broker',type:'text',required:true,placeholder:'mqtt.example.com'},
-    {key:'port',label:'Port',type:'number',default:1883},
-    {key:'username',label:'User',type:'text'},
-    {key:'password',label:'Pass',type:'password'},
-  ]},
-  mqtt_pty: { label:'MQTT PTY', fields:[
-    {key:'buffer_ms',label:'Buffer (ms)',type:'number',default:200,hint:'output batching window — 0 for raw passthrough'},
-  ], requires:'mqtt' },
-  tcp: { label:'TCP', fields:[{key:'port',label:'Port',type:'number',required:true,default:7779}] },
-};
-
-async function loadConfig() {
-  try {
-    const res = await fetch('/config', { headers: authHeaders() });
-    if (res.status === 404) { config = {}; return; }
-    if (!res.ok) return;
-    config = await res.json();
-  } catch(e) { config = {}; }
-  renderTransports();
-}
-
-function isEnabled(n) { return config?.transport?.[n] != null; }
-function getTC(n) { return config?.transport?.[n] || {}; }
-
-function renderTransports() {
-  const tbody = document.getElementById('transports-table');
-  tbody.innerHTML = Object.entries(TRANSPORT_DEFS).map(([name, def]) => {
-    const on = isEnabled(name); const cfg = getTC(name);
-    let ep = '-';
-    if (on) {
-      if (name==='mqtt_pty') { const mc=getTC('mqtt'); ep=mc.broker?mc.broker+':'+(mc.port||1883):'(via mqtt)'; }
-      else if (cfg.port) ep=':'+cfg.port; else if (cfg.broker) ep=cfg.broker+':'+(cfg.port||1883);
-    }
-    return `<tr>
-      <td><label class="toggle"><input type="checkbox" data-t="${esc(name)}" ${on?'checked':''}><span class="sl"></span></label></td>
-      <td><span class="dot ${on?'dot-on':'dot-off'}"></span>${esc(def.label)}</td>
-      <td style="color:var(--text-dim)">${esc(ep)}</td>
-      <td style="text-align:right"><button class="btn" data-edit="${esc(name)}" ${!on?'disabled style="opacity:0.2"':''}>edit</button></td>
-    </tr>`;
-  }).join('');
-
-  tbody.querySelectorAll('input[type=checkbox]').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const n = cb.dataset.t;
-      const def = TRANSPORT_DEFS[n];
-      if (!config.transport) config.transport = {};
-      if (cb.checked) {
-        if (def.requires && !isEnabled(def.requires)) { cb.checked = false; banner(def.label + ' requires ' + TRANSPORT_DEFS[def.requires].label, 'err'); setTimeout(()=>document.getElementById('banner-area').className='banner',3000); return; }
-        const d={}; def.fields.forEach(f=>{if(f.default!=null)d[f.key]=f.default}); config.transport[n]=d;
-      } else {
-        delete config.transport[n];
-        // Disable dependents.
-        Object.entries(TRANSPORT_DEFS).forEach(([dn,dd])=>{ if(dd.requires===n && isEnabled(dn)) delete config.transport[dn]; });
-      }
-      dirty = true; renderTransports(); saveConfig();
-    });
-  });
-  tbody.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openEditModal(b.dataset.edit)));
-  const saveBtn = document.getElementById('btn-save-transports');
-  saveBtn.style.opacity = dirty ? 1 : 0.3;
-  saveBtn.style.pointerEvents = dirty ? 'auto' : 'none';
-  if (dirty) { saveBtn.textContent = '● Save changes'; saveBtn.style.background = 'var(--accent)'; saveBtn.style.color = '#000'; }
-  else { saveBtn.textContent = 'Save'; saveBtn.style.background = ''; saveBtn.style.color = ''; }
-}
-
-function openEditModal(name) {
-  const def = TRANSPORT_DEFS[name]; const cfg = getTC(name);
-  document.getElementById('modal-title').textContent = def.label;
-  const fields = document.getElementById('modal-fields');
-  fields.innerHTML = def.fields.map(f => {
-    let v = cfg[f.key] ?? '';
-    if (f.key==='chat_ids' && Array.isArray(v)) v = v.join(', ');
-    return `<div class="field"><label>${esc(f.label)}${f.required?' *':''}</label><input type="${f.type||'text'}" data-key="${esc(f.key)}" value="${esc(String(v))}" placeholder="${esc(f.placeholder||'')}">
-    ${f.hint?'<div class="hint">'+esc(f.hint)+'</div>':''}</div>`;
-  }).join('');
-  document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').onclick = () => {
-    const u = {}; let ok = true;
-    fields.querySelectorAll('input').forEach(i => {
-      const k=i.dataset.key, fd=def.fields.find(f=>f.key===k); let v=i.value.trim();
-      i.parentElement.querySelector('.error')?.remove();
-      if (fd.required&&!v) { const e=document.createElement('div'); e.className='error'; e.textContent='required'; i.parentElement.appendChild(e); ok=false; return; }
-      if (!v) return;
-      if (fd.type==='number') { const n=parseInt(v); if(isNaN(n)||n<1||n>65535){const e=document.createElement('div');e.className='error';e.textContent='1-65535';i.parentElement.appendChild(e);ok=false;return;} u[k]=n; }
-      else if (k==='chat_ids') u[k]=v.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n));
-      else u[k]=v;
-    });
-    if (!ok) return;
-    if (!config.transport) config.transport = {};
-    config.transport[name] = u; dirty = true; closeModal(); renderTransports(); saveConfig();
-  };
-}
-function closeModal() { document.getElementById('modal-bg').classList.remove('active'); document.getElementById('modal-box').classList.remove('wide'); document.getElementById('modal-save').style.display = ''; }
-document.getElementById('modal-cancel').addEventListener('click', closeModal);
-document.getElementById('modal-bg').addEventListener('click', (e) => { if (e.target.id==='modal-bg') closeModal(); });
-
-async function saveConfig() {
-  if (!dirty) return;
-  const payload = Object.fromEntries(Object.entries(config).filter(([k]) => k !== 'auth'));
-  const res = await fetch('/config', { method:'PUT', headers:authHeaders(), body:JSON.stringify(payload) });
-  const data = await res.json();
-  if (!res.ok) { banner(data.error||'save failed','err'); return; }
-  dirty = false; renderTransports();
-  banner('saved — restart to apply','warn');
-  document.getElementById('btn-restart').style.display = 'inline-block';
-}
-document.getElementById('btn-save-transports').addEventListener('click', saveConfig);
-
-document.getElementById('btn-restart').addEventListener('click', async () => {
-  if (!confirm('Restart hermytt? Active sessions will terminate.')) return;
-  banner('restarting...','warn');
-  await fetch('/restart', { method:'POST', headers:authHeaders() });
-  document.getElementById('btn-restart').style.display = 'none';
-  let n = 0;
-  const poll = setInterval(async () => {
-    n++;
-    try { const r = await fetch('/info',{headers:authHeaders()}); if(r.ok){clearInterval(poll);banner('restarted','ok');setTimeout(()=>document.getElementById('banner-area').className='banner',3000);loadConfig();refreshAll();} }
-    catch(e) { if(n>30){clearInterval(poll);banner('server did not come back','err');} }
-  }, 1000);
-});
-
-window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
-
-// --- Service config panel ---
-
-async function openServicePanel(name) {
-  const regRes = await fetch('/registry', { headers: authHeaders() });
-  const regData = await regRes.json();
-  const svc = (regData.services || []).find(s => s.name === name);
-  if (!svc) return banner('service not found', 'err');
-
-  const role = (svc.role || 'unknown').toLowerCase();
-  if (role === 'parser') return openParserPanel(name);
-
-  // Generic fallback: raw JSON
-  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  const [statusRes, configRes] = await Promise.all([
-    fetch(`${proxy}/status`, { headers: authHeaders() }).catch(() => null),
-    fetch(`${proxy}/config`, { headers: authHeaders() }).catch(() => null),
-  ]);
-  const status = statusRes?.ok ? await statusRes.json() : {};
-  const svcConfig = configRes?.ok ? await configRes.json() : {};
-  document.getElementById('modal-title').textContent = name;
-  document.getElementById('modal-fields').innerHTML =
-    `<div class="field"><label>Status</label><pre style="font-size:11px;color:var(--text-dim);white-space:pre-wrap">${esc(JSON.stringify(status, null, 2))}</pre></div>
-     <div class="field"><label>Config</label><pre style="font-size:11px;color:var(--text-dim);white-space:pre-wrap">${esc(JSON.stringify(svcConfig, null, 2))}</pre></div>`;
-  document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').style.display = 'none';
-}
-
-async function openParserPanel(name) {
-  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-
-  // Try multi-session endpoint first, fall back to single-session
-  const [gryttiSessionsRes, hermyttSessionsRes, statusRes] = await Promise.all([
-    fetch(`${proxy}/sessions`, { headers: authHeaders() }).catch(() => null),
-    fetch('/sessions', { headers: authHeaders() }),
-    fetch(`${proxy}/status`, { headers: authHeaders() }).catch(() => null),
-  ]);
-
-  const hermyttSessions = (await hermyttSessionsRes.json()).sessions || [];
-  const status = statusRes?.ok ? await statusRes.json() : {};
-  let gryttiSessions = [];
-  let multiMode = false;
-
-  if (gryttiSessionsRes?.ok) {
-    const data = await gryttiSessionsRes.json();
-    gryttiSessions = data.sessions || [];
-    multiMode = true;
-  } else {
-    // Fallback: single-session from /config
-    const configRes = await fetch(`${proxy}/config`, { headers: authHeaders() }).catch(() => null);
-    const cfg = configRes?.ok ? await configRes.json() : {};
-    if (cfg.session_id) {
-      gryttiSessions = [{
-        session_id: cfg.session_id,
-        claude_state: status.claude_state || 'unknown',
-        telegram_connected: cfg.telegram_connected || false,
-        telegram_chat_id: status.telegram_chat_id || null,
-        messages_processed: status.messages_processed || 0,
-        debounce_ms: cfg.debounce_ms || 200,
-      }];
-    }
-  }
-
-  document.getElementById('modal-title').textContent = 'grytti — PTY Parser';
-  document.getElementById('modal-box').classList.add('wide');
-  const fields = document.getElementById('modal-fields');
-
-  let html = '';
-
-  // Global status bar
-  html += `<div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap;font-size:12px;color:var(--text-dim)">`;
-  html += `<div>uptime: ${esc(String(status.uptime_secs ? Math.floor(status.uptime_secs/60)+'m' : status.uptime || '-'))}</div>`;
-  html += `<div>MQTT: ${esc(status.mqtt_host || '-')}</div>`;
-  html += `</div>`;
-
-  // Sessions table
-  if (gryttiSessions.length) {
-    html += `<table style="width:100%;font-size:12px;margin-bottom:12px">
-      <thead><tr><th></th><th>session</th><th>claude</th><th>telegram</th><th>msgs</th><th></th></tr></thead><tbody>`;
-    for (const gs of gryttiSessions) {
-      const cls = String(gs.claude_state || 'unknown').toLowerCase().replace(/[^a-z_]/g,'');
-      const tgDot = gs.telegram_connected ? 'dot-on' : 'dot-off';
-      const tgLabel = gs.telegram_chat_id ? `chat ${gs.telegram_chat_id}` : 'not connected';
-      html += `<tr>
-        <td><span class="dot ${gs.telegram_connected?'dot-on':'dot-off'}"></span></td>
-        <td>${esc(gs.session_id.slice(0,12))}</td>
-        <td><span class="svc-status ${cls}">\u25cf ${esc(cls)}</span></td>
-        <td><span class="dot ${tgDot}"></span> ${esc(tgLabel)}</td>
-        <td>${gs.messages_processed || 0}</td>
-        <td style="text-align:right;display:flex;gap:4px;justify-content:flex-end">
-          <button class="btn" onclick="editParserSession('${esc(name)}','${esc(gs.session_id)}')">edit</button>
-          ${multiMode ? `<button class="btn btn-red" onclick="deleteParserSession('${esc(name)}','${esc(gs.session_id)}')">rm</button>` : ''}
-        </td>
-      </tr>`;
-    }
-    html += `</tbody></table>`;
-  } else {
-    html += `<div style="color:var(--text-muted);font-size:12px;margin-bottom:12px">no sessions configured</div>`;
-  }
-
-  // Add session button
-  html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px">
-    <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Add session</div>
-    <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
-      <div style="flex:1;min-width:140px"><label style="font-size:10px;color:var(--text-dim)">Session</label><select id="grytti-add-session">
-        <option value="">— pick —</option>
-        ${hermyttSessions.filter(s => !gryttiSessions.find(g => g.session_id === s.id)).map(s =>
-          `<option value="${esc(s.id)}">${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`
-        ).join('')}
-      </select></div>
-      <div style="flex:1;min-width:200px"><label style="font-size:10px;color:var(--text-dim)">Telegram bot token <span style="color:var(--text-muted)">(optional — blank = headless)</span></label><input type="text" id="grytti-add-token" placeholder="123456:ABC-DEF..."></div>
-      <button class="btn" onclick="addParserSession('${esc(name)}')">add</button>
-    </div>
-  </div>`;
-
-  // Send stdin
-  html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
-    <div style="display:flex;gap:8px;align-items:end">
-      <div style="flex:1"><label style="font-size:10px;color:var(--text-dim)">Send to stdin</label>
-        <div style="display:flex;gap:4px">
-          <select id="grytti-send-session" style="width:140px">
-            ${gryttiSessions.map(s => `<option value="${esc(s.session_id)}">${esc(s.session_id.slice(0,12))}</option>`).join('')}
-          </select>
-          <input type="text" id="grytti-send-text" placeholder="type command..." style="flex:1">
-        </div>
-      </div>
-      <button class="btn" onclick="parserSendStdin('${esc(name)}')">send</button>
-    </div>
-  </div>`;
-
-  fields.innerHTML = html;
-  document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').style.display = 'none';
-}
-
-async function addParserSession(name) {
-  const sid = document.getElementById('grytti-add-session').value;
-  const token = document.getElementById('grytti-add-token').value.trim();
-  if (!sid) return banner('pick a session', 'err');
-  // bot token is optional — headless mode if omitted
-  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  const res = await fetch(`${proxy}/sessions`, {
-    method: 'POST', headers: authHeaders(),
-    body: JSON.stringify(Object.assign({ session_id: sid, debounce_ms: 200 }, token ? { bot_token: token } : {}))
-  });
-  if (res.ok) { closeModal(); banner('session added', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); openParserPanel(name); }
-  else { const d = await res.json().catch(() => ({})); banner(d.error || 'failed', 'err'); }
-}
-
-async function editParserSession(name, sessionId) {
-  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  // Fetch current session config + hermytt sessions in parallel
-  const [gryttiRes, hermyttRes] = await Promise.all([
-    fetch(`${proxy}/sessions`, { headers: authHeaders() }).catch(() => null),
-    fetch('/sessions', { headers: authHeaders() }),
-  ]);
-  let session = {};
-  if (gryttiRes?.ok) {
-    const data = await gryttiRes.json();
-    session = (data.sessions || []).find(s => s.session_id === sessionId) || {};
-  }
-  const hermyttSessions = (await hermyttRes.json()).sessions || [];
-
-  document.getElementById('modal-title').textContent = `Edit — ${sessionId.slice(0,12)}`;
-  const fields = document.getElementById('modal-fields');
-  fields.innerHTML = `
-    <div class="field"><label>Session</label><select id="edit-session-id">
-      ${hermyttSessions.map(s =>
-        `<option value="${esc(s.id)}" ${s.id === sessionId ? 'selected' : ''}>${esc(s.id)}${s.host ? ' ('+esc(s.host)+')' : ''}</option>`
-      ).join('')}
-    </select></div>
-    <div class="field"><label>Telegram bot token</label><input type="text" id="edit-bot-token" value="" placeholder="${session.telegram_connected ? '(token set — leave blank to keep)' : '123456:ABC-DEF...'}"></div>
-    <div class="field"><label>Debounce (ms): <span id="edit-debounce-val">${session.debounce_ms || 200}</span></label>
-      <input type="range" id="edit-debounce" min="50" max="2000" step="50" value="${session.debounce_ms || 200}" oninput="document.getElementById('edit-debounce-val').textContent=this.value">
-    </div>`;
-
-  document.getElementById('modal-bg').classList.add('active');
-  document.getElementById('modal-save').style.display = '';
-  document.getElementById('modal-save').onclick = async () => {
-    const update = {
-      session_id: document.getElementById('edit-session-id').value,
-      debounce_ms: parseInt(document.getElementById('edit-debounce').value),
-    };
-    const token = document.getElementById('edit-bot-token').value.trim();
-    if (token) update.bot_token = token;
-    const r = await fetch(`${proxy}/sessions/${encodeURIComponent(sessionId)}`, {
-      method: 'PUT', headers: authHeaders(), body: JSON.stringify(update)
-    });
-    if (r.ok) { closeModal(); banner('updated', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); openParserPanel(name); }
-    else if (r.status === 404) { banner('session not found', 'err'); }
-    else { const d = await r.json().catch(() => ({})); banner(d.error || 'update failed', 'err'); }
-  };
-}
-
-async function deleteParserSession(name, sessionId) {
-  if (!confirm(`Remove session ${sessionId.slice(0,12)}? This disconnects the Telegram bot.`)) return;
-  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  const res = await fetch(`${proxy}/sessions/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: authHeaders() });
-  if (res.ok) { banner('removed', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 3000); openParserPanel(name); }
-  else if (res.status === 404) { banner('session not found', 'err'); }
-  else { const d = await res.json().catch(() => ({})); banner(d.error || 'delete failed', 'err'); }
-}
-
-async function parserSendStdin(name) {
-  const sid = document.getElementById('grytti-send-session').value;
-  const text = document.getElementById('grytti-send-text').value.trim();
-  if (!text) return;
-  const proxy = `/registry/${encodeURIComponent(name)}/proxy`;
-  const res = await fetch(`${proxy}/session/send`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ session_id: sid, text }) });
-  if (res.ok) { document.getElementById('grytti-send-text').value = ''; banner('sent', 'ok'); setTimeout(() => document.getElementById('banner-area').className = 'banner', 2000); }
-  else { banner('send failed', 'err'); }
-}
-
-// --- Boot ---
-function refreshAll() { refreshInfo(); refreshSessions(); refreshFamily(); }
-loadConfig(); refreshAll();
-setInterval(refreshAll, 5000);
-</script>
+<script src="/admin.js"></script>
 </body>
 </html>

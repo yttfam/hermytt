@@ -1,6 +1,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Json;
+use tracing::{info, warn};
 
 use crate::rest::AppState;
 
@@ -11,6 +12,14 @@ pub(crate) async fn registry_proxy(
     headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<axum::response::Response, (StatusCode, Json<serde_json::Value>)> {
+    info!(
+        transport = "proxy",
+        service = %name,
+        method = %method,
+        path = %path,
+        body_bytes = body.len(),
+        "proxy request"
+    );
     let svc = state.registry.get(&name).await.ok_or_else(|| {
         (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": format!("service '{}' not found", name)})))
     })?;
@@ -26,23 +35,44 @@ pub(crate) async fn registry_proxy(
 
     let client = reqwest::Client::new();
     let mut req = client.request(method.clone(), &url);
-    if let Some(ct) = headers.get("content-type") {
-        req = req.header("content-type", ct);
+    for (k, v) in headers.iter() {
+        let name = k.as_str().to_ascii_lowercase();
+        if matches!(
+            name.as_str(),
+            "host" | "connection" | "content-length" | "transfer-encoding" | "keep-alive" | "upgrade"
+        ) {
+            continue;
+        }
+        req = req.header(k.as_str(), v);
     }
     if !body.is_empty() {
         req = req.body(body.to_vec());
     }
 
     let resp = req.send().await.map_err(|e| {
+        warn!(transport = "proxy", service = %name, url = %url, error = %e, "upstream error");
         (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": format!("proxy error: {}", e)})))
     })?;
 
     let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let resp_body = resp.bytes().await.unwrap_or_default();
+    info!(transport = "proxy", service = %name, url = %url, status = %status.as_u16(), "proxy response");
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/json")
+        .to_string();
+
+    // Stream the upstream body straight through — DO NOT collect with `.bytes()`,
+    // that would buffer the whole response before flushing. SSE consumers (the
+    // pyttch-bridge status updater, the /chat tab) need byte-by-byte progress.
+    use futures_util::StreamExt;
+    let stream = resp.bytes_stream().map(|r| r.map_err(std::io::Error::other));
+    let body = axum::body::Body::from_stream(stream);
 
     Ok(axum::response::Response::builder()
         .status(status)
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from(resp_body))
+        .header("content-type", content_type)
+        .body(body)
         .unwrap())
 }
