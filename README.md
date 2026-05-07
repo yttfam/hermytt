@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="hermytt" width="180"/></p>
+
 # hermytt
 
 Transport-agnostic terminal multiplexer. One PTY, any client that speaks text.
